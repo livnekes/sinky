@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Photo Uploader</string>
+    <string name="upload_success">Photo uploaded successfully!</string>
+    <string name="upload_error">Upload failed. Please try again.</string>
+    <string name="select_image_first">Please select an image first</string>
+    <string name="fill_all_fields">Please fill in all configuration fields</string>
+
+    <!-- AWS Configuration -->
+    <string name="aws_bucket_name">photos-sinky</string>
+    <string name="aws_region">eu-central-1</string>
+    <string name="aws_identity_pool_id">eu-central-1:cc6a4034-1d2c-452f-91e6-479b7f98ad99</string>
+</resources>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Modern clean blue color scheme -->
+    <color name="primary_blue">#2196F3</color>
+    <color name="primary_blue_dark">#1976D2</color>
+    <color name="primary_blue_light">#64B5F6</color>
+    <color name="accent_blue">#03A9F4</color>
+    <color name="accent_blue_dark">#0288D1</color>
+
+    <!-- Legacy colors for compatibility -->
+    <color name="purple_200">#64B5F6</color>
+    <color name="purple_500">#2196F3</color>
+    <color name="purple_700">#1976D2</color>
+    <color name="teal_200">#03A9F4</color>
+    <color name="teal_700">#0288D1</color>
+
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="ic_launcher_background">#2196F3</color>
+</resources>
