@@ -1,6 +1,7 @@
 package com.example.s3photouploader
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -11,6 +12,15 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.s3photouploader.databinding.ActivitySettingsBinding
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.Scope
+import com.google.api.client.extensions.android.http.AndroidHttp
+import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
+import com.google.api.client.json.gson.GsonFactory
+import com.google.api.services.drive.Drive
+import com.google.api.services.drive.DriveScopes
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -37,6 +47,23 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    // Google Sign-In launcher for Drive API access
+    private val googleSignInLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            result.data?.let { data ->
+                handleGoogleSignInResult(data)
+            }
+        } else {
+            Toast.makeText(
+                this,
+                "Google Sign-In failed. Cannot access storage info.",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivitySettingsBinding.inflate(layoutInflater)
@@ -51,6 +78,11 @@ class SettingsActivity : AppCompatActivity() {
         binding.accountEmailText.text = userEmail ?: "Not set"
 
         checkPermissionAndLoadStats()
+
+        // Set up Google Storage button
+        binding.refreshGoogleStorageButton.setOnClickListener {
+            requestGoogleStorageInfo()
+        }
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -140,6 +172,87 @@ class SettingsActivity : AppCompatActivity() {
 
         val df = DecimalFormat("#.##")
         return "${df.format(size)} ${units[unitIndex]}"
+    }
+
+    private fun requestGoogleStorageInfo() {
+        binding.googleStorageUsedText.text = "Loading..."
+        binding.googleStorageTotalText.text = "Loading..."
+
+        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestScopes(Scope(DriveScopes.DRIVE_READONLY))
+            .build()
+
+        val googleSignInClient = GoogleSignIn.getClient(this, gso)
+        googleSignInLauncher.launch(googleSignInClient.signInIntent)
+    }
+
+    private fun handleGoogleSignInResult(data: Intent) {
+        val task = GoogleSignIn.getSignedInAccountFromIntent(data)
+        try {
+            val account = task.result
+            if (account != null) {
+                queryGoogleDriveStorage(account)
+            } else {
+                binding.googleStorageUsedText.text = "Sign-in failed"
+                binding.googleStorageTotalText.text = "Sign-in failed"
+                Toast.makeText(this, "Failed to sign in to Google", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("SettingsActivity", "Google Sign-In error", e)
+            binding.googleStorageUsedText.text = "Error"
+            binding.googleStorageTotalText.text = "Error"
+            Toast.makeText(this, "Error signing in: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun queryGoogleDriveStorage(account: GoogleSignInAccount) {
+        lifecycleScope.launch {
+            try {
+                val storageInfo = withContext(Dispatchers.IO) {
+                    // Set up credentials
+                    val credential = GoogleAccountCredential.usingOAuth2(
+                        this@SettingsActivity,
+                        listOf(DriveScopes.DRIVE_READONLY)
+                    )
+                    credential.selectedAccount = account.account
+
+                    // Build Drive service
+                    val driveService = Drive.Builder(
+                        AndroidHttp.newCompatibleTransport(),
+                        GsonFactory.getDefaultInstance(),
+                        credential
+                    )
+                        .setApplicationName(getString(R.string.app_name))
+                        .build()
+
+                    // Query storage quota
+                    val about = driveService.about().get()
+                        .setFields("storageQuota")
+                        .execute()
+
+                    val quota = about.storageQuota
+                    val usage = quota?.usage ?: 0L
+                    val limit = quota?.limit ?: 0L
+
+                    Pair(usage, limit)
+                }
+
+                // Update UI with storage info
+                binding.googleStorageUsedText.text = formatBytes(storageInfo.first)
+                binding.googleStorageTotalText.text = formatBytes(storageInfo.second)
+
+            } catch (e: Exception) {
+                android.util.Log.e("SettingsActivity", "Error querying Google storage", e)
+                binding.googleStorageUsedText.text = "Error"
+                binding.googleStorageTotalText.text = "Error"
+                Toast.makeText(
+                    this@SettingsActivity,
+                    "Error loading Google storage: ${e.message}",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
     }
 
     data class PhotoStats(val count: Int, val totalSize: Long)
