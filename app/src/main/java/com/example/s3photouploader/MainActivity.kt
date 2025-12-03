@@ -199,24 +199,11 @@ class MainActivity : AppCompatActivity() {
                 startActivity(Intent(this, SettingsActivity::class.java))
                 true
             }
-            R.id.action_change_account -> {
-                showAccountPicker()
-                true
-            }
             else -> super.onOptionsItemSelected(item)
         }
     }
 
     private fun setupListeners() {
-        // Load delete preference
-        val prefs = getSharedPreferences("app_settings", Context.MODE_PRIVATE)
-        binding.deleteAfterUploadSwitch.isChecked = prefs.getBoolean("delete_after_upload", false)
-
-        // Save delete preference when changed
-        binding.deleteAfterUploadSwitch.setOnCheckedChangeListener { _, isChecked ->
-            prefs.edit().putBoolean("delete_after_upload", isChecked).apply()
-        }
-
         // Mode toggle listener
         binding.modeToggleGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (isChecked) {

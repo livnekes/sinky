@@ -4,9 +4,6 @@
     <item
         android:id="@+id/action_settings"
         android:title="Settings"
-        app:showAsAction="never" />
-    <item
-        android:id="@+id/action_change_account"
-        android:title="Change Account"
-        app:showAsAction="never" />
+        android:icon="@drawable/ic_settings"
+        app:showAsAction="ifRoom" />
 </menu>

@@ -1,6 +1,7 @@
 package com.example.s3photouploader
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -50,7 +51,52 @@ class SettingsActivity : AppCompatActivity() {
         val userEmail = AccountHelper.getUserEmail(this)
         binding.accountEmailText.text = userEmail ?: "Not set"
 
+        // Set up Change Account button
+        binding.changeAccountButton.setOnClickListener {
+            showAccountPicker()
+        }
+
+        // Set up delete after upload switch
+        val prefs = getSharedPreferences("app_settings", MODE_PRIVATE)
+        binding.deleteAfterUploadSwitch.isChecked = prefs.getBoolean("delete_after_upload", false)
+        binding.deleteAfterUploadSwitch.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean("delete_after_upload", isChecked).apply()
+        }
+
         checkPermissionAndLoadStats()
+    }
+
+    private fun showAccountPicker() {
+        try {
+            val intent = android.accounts.AccountManager.newChooseAccountIntent(
+                null, // selectedAccount
+                null, // allowableAccounts
+                arrayOf("com.google"), // allowableAccountTypes - Google accounts only
+                null, // descriptionOverrideText
+                null, // addAccountAuthTokenType
+                null, // addAccountRequiredFeatures
+                null  // addAccountOptions
+            )
+            startActivityForResult(intent, REQUEST_ACCOUNT_PICKER)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Failed to open account picker: ${e.message}", Toast.LENGTH_SHORT).show()
+            android.util.Log.e("SettingsActivity", "Failed to open account picker", e)
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_ACCOUNT_PICKER && resultCode == RESULT_OK) {
+            data?.getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME)?.let { email ->
+                AccountHelper.saveUserEmail(this, email)
+                binding.accountEmailText.text = email
+                Toast.makeText(this, "Account changed to: $email", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    companion object {
+        private const val REQUEST_ACCOUNT_PICKER = 1001
     }
 
     override fun onSupportNavigateUp(): Boolean {

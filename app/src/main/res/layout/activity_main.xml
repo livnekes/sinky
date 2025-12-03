@@ -120,19 +120,10 @@
                         android:id="@+id/selectPhotoButton"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginBottom="12dp"
+                        android:layout_marginBottom="16dp"
                         android:text="Select Photos"
                         app:icon="@android:drawable/ic_menu_gallery"
                         style="@style/Widget.Material3.Button.OutlinedButton" />
-
-                    <com.google.android.material.materialswitch.MaterialSwitch
-                        android:id="@+id/deleteAfterUploadSwitch"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginBottom="16dp"
-                        android:text="Delete photos after successful upload"
-                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                        android:checked="false" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/uploadButton"
