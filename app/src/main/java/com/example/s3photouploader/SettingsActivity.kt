@@ -15,11 +15,21 @@ import com.example.s3photouploader.databinding.ActivitySettingsBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.text.DecimalFormat
+import java.util.concurrent.TimeUnit
 
 class SettingsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySettingsBinding
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .build()
 
     // Permission launcher for reading photos
     private val permissionLauncher = registerForActivityResult(
@@ -63,7 +73,13 @@ class SettingsActivity : AppCompatActivity() {
             prefs.edit().putBoolean("delete_after_upload", isChecked).apply()
         }
 
+        // Set up refresh cloud stats button
+        binding.refreshCloudStatsButton.setOnClickListener {
+            loadCloudStats()
+        }
+
         checkPermissionAndLoadStats()
+        loadCloudStats()
     }
 
     private fun showAccountPicker() {
@@ -172,6 +188,106 @@ class SettingsActivity : AppCompatActivity() {
         return@withContext PhotoStats(count, totalSize)
     }
 
+    private fun loadCloudStats() {
+        binding.cloudPhotoCountText.text = "Loading..."
+        binding.cloudStorageUsedText.text = "Loading..."
+        binding.refreshCloudStatsButton.isEnabled = false
+
+        lifecycleScope.launch {
+            try {
+                val securePrefix = AccountHelper.getSecureUploadPrefix(this@SettingsActivity)
+                if (securePrefix == null) {
+                    binding.cloudPhotoCountText.text = "Account not set"
+                    binding.cloudStorageUsedText.text = "N/A"
+                    binding.refreshCloudStatsButton.isEnabled = true
+                    return@launch
+                }
+
+                val lambdaEndpoint = getString(R.string.lambda_stats_endpoint)
+
+                // Check if endpoint is configured
+                if (lambdaEndpoint.contains("your-lambda-url")) {
+                    binding.cloudPhotoCountText.text = "Not configured"
+                    binding.cloudStorageUsedText.text = "N/A"
+                    binding.refreshCloudStatsButton.isEnabled = true
+                    Toast.makeText(
+                        this@SettingsActivity,
+                        "Please configure lambda_stats_endpoint in strings.xml",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@launch
+                }
+
+                val stats = withContext(Dispatchers.IO) {
+                    fetchCloudStatsFromLambda(lambdaEndpoint, securePrefix)
+                }
+
+                binding.cloudPhotoCountText.text = "${stats.objectCount} photos"
+                binding.cloudStorageUsedText.text = formatBytes(stats.totalSize)
+                binding.refreshCloudStatsButton.isEnabled = true
+
+            } catch (e: Exception) {
+                android.util.Log.e("SettingsActivity", "Error loading cloud stats", e)
+                binding.cloudPhotoCountText.text = "Error loading"
+                binding.cloudStorageUsedText.text = "Error"
+                binding.refreshCloudStatsButton.isEnabled = true
+                Toast.makeText(
+                    this@SettingsActivity,
+                    "Error loading cloud statistics: ${e.message}",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    /**
+     * Calls Lambda function to get cloud storage statistics
+     *
+     * Expected Lambda request:
+     * POST /stats
+     * Content-Type: application/json
+     * Body: {"prefix": "email_guid"}
+     *
+     * Expected Lambda response:
+     * {
+     *   "objectCount": 123,
+     *   "totalSize": 1234567890
+     * }
+     */
+    private fun fetchCloudStatsFromLambda(endpoint: String, prefix: String): CloudStorageStats {
+        // Create JSON request body
+        val requestBody = JSONObject().apply {
+            put("prefix", prefix)
+        }.toString()
+
+        android.util.Log.d("SettingsActivity", "Calling Lambda endpoint: $endpoint with prefix: $prefix")
+
+        // Create HTTP request
+        val request = Request.Builder()
+            .url(endpoint)
+            .post(requestBody.toRequestBody("application/json".toMediaType()))
+            .build()
+
+        // Execute request
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw Exception("Lambda returned error: ${response.code} ${response.message}")
+            }
+
+            val responseBody = response.body?.string()
+                ?: throw Exception("Empty response from Lambda")
+
+            android.util.Log.d("SettingsActivity", "Lambda response: $responseBody")
+
+            // Parse JSON response
+            val json = JSONObject(responseBody)
+            val objectCount = json.getInt("objectCount")
+            val totalSize = json.getLong("totalSize")
+
+            return CloudStorageStats(objectCount, totalSize)
+        }
+    }
+
     private fun formatBytes(bytes: Long): String {
         if (bytes < 1024) return "$bytes B"
 
@@ -189,4 +305,5 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     data class PhotoStats(val count: Int, val totalSize: Long)
+    data class CloudStorageStats(val objectCount: Int, val totalSize: Long)
 }
