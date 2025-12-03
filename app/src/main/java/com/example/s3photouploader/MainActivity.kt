@@ -1,6 +1,7 @@
 package com.example.s3photouploader
 
 import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -12,6 +13,7 @@ import android.os.Bundle
 import android.provider.MediaStore
 import android.view.View
 import android.widget.Toast
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -43,6 +45,43 @@ class MainActivity : AppCompatActivity() {
     private var endDateMillis: Long? = null
     private var isDateRangeMode = false
     private val dateRangePhotos = mutableListOf<Uri>()
+
+    // For batch deletion after upload
+    private var photosToDelete = mutableListOf<Uri>()
+
+    // Delete request launcher for Android 10+
+    private val deleteRequestLauncher = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        android.util.Log.d("MainActivity", "Delete request result code: ${result.resultCode}, RESULT_OK=$RESULT_OK")
+
+        if (result.resultCode == RESULT_OK) {
+            val deletedCount = photosToDelete.size
+            Toast.makeText(
+                this,
+                "System confirmed deletion of $deletedCount photo(s)",
+                Toast.LENGTH_LONG
+            ).show()
+            android.util.Log.d("MainActivity", "Successfully deleted $deletedCount photos: ${photosToDelete.joinToString()}")
+            photosToDelete.clear()
+        } else if (result.resultCode == Activity.RESULT_CANCELED) {
+            Toast.makeText(
+                this,
+                "Photo deletion was cancelled by user",
+                Toast.LENGTH_LONG
+            ).show()
+            android.util.Log.w("MainActivity", "Photo deletion cancelled by user (RESULT_CANCELED)")
+            photosToDelete.clear()
+        } else {
+            Toast.makeText(
+                this,
+                "Photo deletion failed - result code: ${result.resultCode}",
+                Toast.LENGTH_LONG
+            ).show()
+            android.util.Log.e("MainActivity", "Photo deletion failed with result code: ${result.resultCode}")
+            photosToDelete.clear()
+        }
+    }
 
     // Image picker launcher for multiple selection
     private val imagePickerLauncher = registerForActivityResult(
@@ -169,6 +208,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupListeners() {
+        // Load delete preference
+        val prefs = getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        binding.deleteAfterUploadSwitch.isChecked = prefs.getBoolean("delete_after_upload", false)
+
+        // Save delete preference when changed
+        binding.deleteAfterUploadSwitch.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean("delete_after_upload", isChecked).apply()
+        }
+
         // Mode toggle listener
         binding.modeToggleGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (isChecked) {
@@ -442,6 +490,182 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, "Upload cancelled", Toast.LENGTH_SHORT).show()
     }
 
+    private fun extractMediaStoreUri(uri: Uri): Uri? {
+        try {
+            val authority = uri.authority
+            val uriString = uri.toString()
+
+            // Check if this is a Google Photos content provider URI
+            if (authority == "com.google.android.apps.photos.contentprovider") {
+                android.util.Log.d("MainActivity", "Detected Google Photos URI, extracting MediaStore URI")
+
+                // Extract the encoded MediaStore URI from the path
+                // Pattern: content://com.google.android.apps.photos.contentprovider/.../content%3A%2F%2Fmedia%2F.../...
+                // Match the full encoded MediaStore URI (everything from content%3A up to the next path segment)
+                val contentMatch = Regex("content%3A%2F%2Fmedia%2F[^/]+%2F[^/]+%2F[^/]+%2F\\d+").find(uriString)
+                if (contentMatch != null) {
+                    val encodedUri = contentMatch.value
+                    val decodedUri = java.net.URLDecoder.decode(encodedUri, "UTF-8")
+                    android.util.Log.d("MainActivity", "Extracted and decoded MediaStore URI: $decodedUri")
+                    return Uri.parse(decodedUri)
+                } else {
+                    android.util.Log.w("MainActivity", "Could not extract MediaStore URI pattern from: $uriString")
+                }
+            }
+
+            // If it's already a MediaStore URI, return it as-is
+            if (authority == "media" || authority?.startsWith("com.android.providers.media") == true) {
+                return uri
+            }
+
+            return null
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error extracting MediaStore URI from $uri", e)
+            return null
+        }
+    }
+
+    private fun validateAndFilterMediaStoreUris(uris: List<Uri>): List<Uri> {
+        val validUris = mutableListOf<Uri>()
+
+        for (uri in uris) {
+            try {
+                android.util.Log.d("MainActivity", "Processing URI: $uri")
+
+                // Try to extract the real MediaStore URI
+                val mediaStoreUri = extractMediaStoreUri(uri)
+
+                if (mediaStoreUri == null) {
+                    android.util.Log.w("MainActivity", "Could not extract MediaStore URI from: $uri")
+                    continue
+                }
+
+                android.util.Log.d("MainActivity", "Using MediaStore URI: $mediaStoreUri")
+
+                // Try to query the URI to make sure it's accessible
+                contentResolver.query(mediaStoreUri, arrayOf(MediaStore.Images.Media._ID), null, null, null)?.use { cursor ->
+                    if (cursor.count > 0) {
+                        validUris.add(mediaStoreUri)
+                        android.util.Log.d("MainActivity", "URI is valid and accessible: $mediaStoreUri")
+                    } else {
+                        android.util.Log.w("MainActivity", "URI exists but no data: $mediaStoreUri")
+                    }
+                } ?: run {
+                    android.util.Log.w("MainActivity", "Cannot query URI: $mediaStoreUri")
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "Error validating URI $uri", e)
+            }
+        }
+
+        android.util.Log.d("MainActivity", "Validated ${validUris.size} of ${uris.size} URIs")
+        return validUris
+    }
+
+    private fun requestDeletePhotos(urisToDelete: List<Uri>) {
+        if (urisToDelete.isEmpty()) {
+            android.util.Log.w("MainActivity", "requestDeletePhotos called with empty list")
+            return
+        }
+
+        android.util.Log.d("MainActivity", "Requesting deletion of ${urisToDelete.size} photos")
+        android.util.Log.d("MainActivity", "URIs to delete: ${urisToDelete.joinToString()}")
+        android.util.Log.d("MainActivity", "Android SDK: ${Build.VERSION.SDK_INT}")
+
+        // Validate and filter URIs to only include valid MediaStore URIs
+        val validUris = validateAndFilterMediaStoreUris(urisToDelete)
+
+        if (validUris.isEmpty()) {
+            android.util.Log.e("MainActivity", "No valid MediaStore URIs found for deletion")
+            Toast.makeText(
+                this,
+                "Cannot delete: No valid photo URIs found (${urisToDelete.size} invalid)",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
+        if (validUris.size < urisToDelete.size) {
+            android.util.Log.w("MainActivity", "Filtered out ${urisToDelete.size - validUris.size} invalid URIs")
+        }
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // Android 11+ (API 30+): Use MediaStore delete request
+                android.util.Log.d("MainActivity", "Using MediaStore.createDeleteRequest (Android 11+)")
+                val deleteRequest = MediaStore.createDeleteRequest(
+                    contentResolver,
+                    validUris
+                )
+                android.util.Log.d("MainActivity", "Delete request created, launching intent sender")
+                deleteRequestLauncher.launch(
+                    IntentSenderRequest.Builder(deleteRequest.intentSender).build()
+                )
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Android 10 (API 29): Try to delete directly, may fail if we don't own the files
+                var successCount = 0
+                for (uri in validUris) {
+                    try {
+                        val deleted = contentResolver.delete(uri, null, null)
+                        if (deleted > 0) successCount++
+                    } catch (e: Exception) {
+                        android.util.Log.e("MainActivity", "Error deleting $uri: ${e.message}")
+                    }
+                }
+                if (successCount > 0) {
+                    Toast.makeText(
+                        this,
+                        "Deleted $successCount of ${validUris.size} photo(s) from device",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    Toast.makeText(
+                        this,
+                        "Could not delete photos (permission denied)",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            } else {
+                // Android 9 and below: Direct deletion should work
+                var successCount = 0
+                for (uri in validUris) {
+                    try {
+                        val deleted = contentResolver.delete(uri, null, null)
+                        if (deleted > 0) successCount++
+                    } catch (e: Exception) {
+                        android.util.Log.e("MainActivity", "Error deleting $uri: ${e.message}")
+                    }
+                }
+                Toast.makeText(
+                    this,
+                    "Deleted $successCount of ${validUris.size} photo(s) from device",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        } catch (e: SecurityException) {
+            android.util.Log.e("MainActivity", "SecurityException requesting photo deletion", e)
+            Toast.makeText(
+                this,
+                "Permission denied: Cannot delete photos (SecurityException)",
+                Toast.LENGTH_LONG
+            ).show()
+        } catch (e: IllegalArgumentException) {
+            android.util.Log.e("MainActivity", "IllegalArgumentException - Invalid URIs", e)
+            Toast.makeText(
+                this,
+                "Error: Invalid photo URIs for deletion",
+                Toast.LENGTH_LONG
+            ).show()
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Unexpected error requesting photo deletion", e)
+            Toast.makeText(
+                this,
+                "Error deleting photos: ${e.javaClass.simpleName} - ${e.message}",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
     private fun checkPermissionAndPickImage() {
         val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Manifest.permission.READ_MEDIA_IMAGES
@@ -517,7 +741,13 @@ class MainActivity : AppCompatActivity() {
         val totalImages = imagesToUpload.size
         val uploadedUrls = mutableListOf<String>()
         var uploadedCount = 0
+        var skippedCount = 0
         val newFailedUris = mutableListOf<Uri>()
+        val successfullyUploadedUris = mutableListOf<Uri>()
+
+        // Check if delete after upload is enabled
+        val prefs = getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+        val deleteAfterUpload = prefs.getBoolean("delete_after_upload", false)
 
         // Upload in background
         uploadJob = lifecycleScope.launch {
@@ -541,7 +771,17 @@ class MainActivity : AppCompatActivity() {
                         }
 
                         uploadedUrls.add(result)
-                        uploadedCount++
+
+                        // Check if this was actually uploaded or skipped (already exists)
+                        if (result.contains("already uploaded")) {
+                            skippedCount++
+                        } else {
+                            uploadedCount++
+                            // Collect URI for batch deletion later
+                            if (deleteAfterUpload) {
+                                successfullyUploadedUris.add(imageUri)
+                            }
+                        }
                     } catch (e: TimeoutCancellationException) {
                         // Upload timed out
                         newFailedUris.add(imageUri)
@@ -569,12 +809,31 @@ class MainActivity : AppCompatActivity() {
                 binding.selectPhotoButton.isEnabled = true
                 binding.cancelButton.visibility = View.GONE
 
+                // Request batch deletion if enabled and we have photos to delete
+                if (deleteAfterUpload && successfullyUploadedUris.isNotEmpty()) {
+                    photosToDelete.clear()
+                    photosToDelete.addAll(successfullyUploadedUris)
+                    requestDeletePhotos(photosToDelete)
+                }
+
                 if (newFailedUris.isEmpty()) {
                     // All uploads successful
-                    binding.statusTextView.text = "Successfully uploaded $uploadedCount image(s)!"
+                    val statusMessage = if (skippedCount > 0) {
+                        "Uploaded $uploadedCount, skipped $skippedCount (already uploaded)"
+                    } else {
+                        "Successfully uploaded $uploadedCount image(s)"
+                    }
+
+                    val deleteMessage = if (deleteAfterUpload && successfullyUploadedUris.isNotEmpty()) {
+                        ". Requesting deletion of ${successfullyUploadedUris.size} photo(s)..."
+                    } else {
+                        ""
+                    }
+
+                    binding.statusTextView.text = "$statusMessage$deleteMessage!"
                     Toast.makeText(
                         this@MainActivity,
-                        "All $uploadedCount image(s) uploaded successfully!",
+                        "$statusMessage$deleteMessage",
                         Toast.LENGTH_LONG
                     ).show()
 
@@ -586,10 +845,22 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     // Some uploads failed
                     val failedCount = newFailedUris.size
-                    binding.statusTextView.text = "Uploaded $uploadedCount of $totalImages. $failedCount failed."
+                    val statusMessage = if (skippedCount > 0) {
+                        "Uploaded $uploadedCount, skipped $skippedCount. $failedCount failed."
+                    } else {
+                        "Uploaded $uploadedCount of $totalImages. $failedCount failed."
+                    }
+
+                    val deleteMessage = if (deleteAfterUpload && successfullyUploadedUris.isNotEmpty()) {
+                        " Requesting deletion of ${successfullyUploadedUris.size} photo(s)..."
+                    } else {
+                        ""
+                    }
+
+                    binding.statusTextView.text = "$statusMessage$deleteMessage"
                     Toast.makeText(
                         this@MainActivity,
-                        "Uploaded $uploadedCount, $failedCount failed. Tap Retry to try again.",
+                        "$statusMessage$deleteMessage Tap Retry to try again.",
                         Toast.LENGTH_LONG
                     ).show()
 
