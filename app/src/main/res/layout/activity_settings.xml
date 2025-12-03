@@ -111,12 +111,35 @@
                     android:orientation="vertical"
                     android:padding="16dp">
 
-                    <TextView
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Cloud Storage"
-                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                        android:layout_marginBottom="16dp" />
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="16dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Cloud Storage"
+                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/refreshCloudStatsButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Refresh"
+                            android:textSize="12sp"
+                            android:minWidth="0dp"
+                            android:minHeight="0dp"
+                            android:paddingStart="12dp"
+                            android:paddingEnd="12dp"
+                            android:paddingTop="6dp"
+                            android:paddingBottom="6dp"
+                            style="@style/Widget.Material3.Button.TextButton" />
+
+                    </LinearLayout>
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -144,8 +167,7 @@
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:layout_marginBottom="12dp">
+                        android:orientation="horizontal">
 
                         <TextView
                             android:layout_width="0dp"
@@ -164,20 +186,6 @@
 
                     </LinearLayout>
 
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/refreshCloudStatsButton"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Refresh"
-                        android:textSize="12sp"
-                        android:minWidth="0dp"
-                        android:minHeight="0dp"
-                        android:paddingStart="12dp"
-                        android:paddingEnd="12dp"
-                        android:paddingTop="6dp"
-                        android:paddingBottom="6dp"
-                        style="@style/Widget.Material3.Button.TextButton" />
-
                 </LinearLayout>
 
             </com.google.android.material.card.MaterialCardView>
@@ -194,35 +202,19 @@
                     android:orientation="vertical"
                     android:padding="16dp">
 
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Account"
-                        android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                        android:layout_marginBottom="16dp" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Email:"
-                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                        android:textColor="?android:attr/textColorSecondary"
-                        android:layout_marginBottom="8dp" />
-
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
-                        android:gravity="center_vertical">
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="16dp">
 
                         <TextView
-                            android:id="@+id/accountEmailText"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="Not set"
-                            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                            android:layout_marginEnd="8dp" />
+                            android:text="Account"
+                            android:textAppearance="@style/TextAppearance.Material3.TitleMedium" />
 
                         <com.google.android.material.button.MaterialButton
                             android:id="@+id/changeAccountButton"
@@ -239,6 +231,21 @@
                             style="@style/Widget.Material3.Button.TextButton" />
 
                     </LinearLayout>
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Email:"
+                        android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:layout_marginBottom="8dp" />
+
+                    <TextView
+                        android:id="@+id/accountEmailText"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Not set"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium" />
 
                 </LinearLayout>
 

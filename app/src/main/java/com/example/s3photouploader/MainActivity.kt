@@ -824,6 +824,11 @@ class MainActivity : AppCompatActivity() {
                         Toast.LENGTH_LONG
                     ).show()
 
+                    // Signal that cloud stats should be refreshed
+                    if (uploadedCount > 0) {
+                        prefs.edit().putBoolean("should_refresh_cloud_stats", true).apply()
+                    }
+
                     // Clear selection and preview
                     selectedImageUris.clear()
                     binding.imagePreview.setImageDrawable(null)
@@ -850,6 +855,11 @@ class MainActivity : AppCompatActivity() {
                         "$statusMessage$deleteMessage Tap Retry to try again.",
                         Toast.LENGTH_LONG
                     ).show()
+
+                    // Signal that cloud stats should be refreshed if some uploads succeeded
+                    if (uploadedCount > 0) {
+                        prefs.edit().putBoolean("should_refresh_cloud_stats", true).apply()
+                    }
 
                     binding.uploadButton.isEnabled = selectedImageUris.isNotEmpty()
                     binding.retryButton.visibility = View.VISIBLE

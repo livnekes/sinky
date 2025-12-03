@@ -115,6 +115,21 @@ class SettingsActivity : AppCompatActivity() {
         private const val REQUEST_ACCOUNT_PICKER = 1001
     }
 
+    override fun onResume() {
+        super.onResume()
+
+        // Check if we should refresh cloud stats after an upload
+        val prefs = getSharedPreferences("app_settings", MODE_PRIVATE)
+        val shouldRefresh = prefs.getBoolean("should_refresh_cloud_stats", false)
+
+        if (shouldRefresh) {
+            // Clear the flag
+            prefs.edit().putBoolean("should_refresh_cloud_stats", false).apply()
+            // Refresh stats
+            loadCloudStats()
+        }
+    }
+
     override fun onSupportNavigateUp(): Boolean {
         finish()
         return true
