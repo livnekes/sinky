@@ -113,7 +113,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Permission launcher for images
+    // Permission launcher for images (when selecting photos)
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -124,6 +124,19 @@ class MainActivity : AppCompatActivity() {
                 this,
                 "Permission denied. Cannot access photos.",
                 Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    // Permission launcher for startup
+    private val startupPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (!isGranted) {
+            Toast.makeText(
+                this,
+                "Photo access permission is required to use this app.",
+                Toast.LENGTH_LONG
             ).show()
         }
     }
@@ -157,7 +170,25 @@ class MainActivity : AppCompatActivity() {
         s3Uploader = CognitoS3Uploader()
 
         setupListeners()
+        requestPermissionsIfNeeded()
         promptForAccountIfNeeded()
+    }
+
+    private fun requestPermissionsIfNeeded() {
+        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_IMAGES
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+
+        when {
+            ContextCompat.checkSelfPermission(
+                this,
+                permission
+            ) != PackageManager.PERMISSION_GRANTED -> {
+                startupPermissionLauncher.launch(permission)
+            }
+        }
     }
 
     private fun promptForAccountIfNeeded() {
@@ -272,10 +303,16 @@ class MainActivity : AppCompatActivity() {
             // Date range mode
             binding.selectPhotoButton.visibility = View.GONE
             binding.datePickerSection.visibility = View.VISIBLE
-            binding.imagePreview.visibility = View.GONE
+            binding.imagePreview.visibility = View.VISIBLE
+            binding.imagePreview.setImageResource(R.drawable.ic_image_placeholder)
+            binding.imagePreview.scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
 
             // Check if dates are selected and photos are queried
             if (startDateMillis != null && endDateMillis != null && dateRangePhotos.isNotEmpty()) {
+                // Show first image as preview
+                binding.imagePreview.setImageURI(dateRangePhotos[0])
+                binding.imagePreview.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+
                 binding.uploadButton.isEnabled = true
                 binding.uploadButton.text = "Start Backup (${dateRangePhotos.size} photos)"
                 binding.statusTextView.text = "Found ${dateRangePhotos.size} photos. Ready to backup."
@@ -296,6 +333,8 @@ class MainActivity : AppCompatActivity() {
             binding.uploadButton.text = "Upload Photos"
 
             if (selectedImageUris.isEmpty()) {
+                binding.imagePreview.setImageResource(R.drawable.ic_image_placeholder)
+                binding.imagePreview.scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
                 binding.statusTextView.text = "Select photos to upload"
             } else {
                 binding.statusTextView.text = "${selectedImageUris.size} image(s) selected. Ready to upload."
@@ -359,10 +398,16 @@ class MainActivity : AppCompatActivity() {
                 dateRangePhotos.addAll(photoUris)
 
                 if (photoUris.isEmpty()) {
+                    binding.imagePreview.setImageResource(R.drawable.ic_image_placeholder)
+                    binding.imagePreview.scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
                     binding.statusTextView.text = "No photos found in date range"
                     binding.uploadButton.isEnabled = false
                     binding.uploadButton.text = "Start Backup (0 photos)"
                 } else {
+                    // Show first image as preview
+                    binding.imagePreview.setImageURI(photoUris[0])
+                    binding.imagePreview.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+
                     binding.statusTextView.text = "Found ${photoUris.size} photos. Ready to backup."
                     binding.uploadButton.isEnabled = true
                     binding.uploadButton.text = "Start Backup (${photoUris.size} photos)"
@@ -831,7 +876,8 @@ class MainActivity : AppCompatActivity() {
 
                     // Clear selection and preview
                     selectedImageUris.clear()
-                    binding.imagePreview.setImageDrawable(null)
+                    binding.imagePreview.setImageResource(R.drawable.ic_image_placeholder)
+                    binding.imagePreview.scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
                     binding.uploadButton.isEnabled = false
                     binding.retryButton.visibility = View.GONE
                 } else {
