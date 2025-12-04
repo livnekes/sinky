@@ -16,7 +16,8 @@
             android:layout_height="?attr/actionBarSize"
             android:background="?attr/colorPrimary"
             app:title="@string/app_name"
-            app:titleTextColor="@android:color/white" />
+            app:titleTextColor="@android:color/white"
+            app:menu="@menu/main_menu" />
 
     </com.google.android.material.appbar.AppBarLayout>
 
@@ -36,7 +37,9 @@
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="16dp"
                 app:cardCornerRadius="8dp"
-                app:cardElevation="4dp">
+                app:cardElevation="4dp"
+                app:strokeColor="@color/border_color"
+                app:strokeWidth="2dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -107,14 +110,25 @@
 
                     </LinearLayout>
 
-                    <ImageView
-                        android:id="@+id/imagePreview"
+                    <FrameLayout
                         android:layout_width="match_parent"
-                        android:layout_height="200dp"
-                        android:layout_marginBottom="16dp"
-                        android:scaleType="centerCrop"
-                        android:background="?attr/colorSurfaceVariant"
-                        android:contentDescription="Selected image preview" />
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="16dp">
+
+                        <ImageView
+                            android:id="@+id/imagePreview"
+                            android:layout_width="match_parent"
+                            android:layout_height="200dp"
+                            android:scaleType="centerCrop"
+                            android:background="?attr/colorSurfaceVariant"
+                            android:contentDescription="Selected image preview" />
+
+                        <View
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:background="@drawable/border_preview" />
+
+                    </FrameLayout>
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/selectPhotoButton"

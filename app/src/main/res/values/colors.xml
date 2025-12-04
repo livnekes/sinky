@@ -1,18 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Modern clean blue color scheme -->
+    <!-- Blue to Purple gradient theme matching app icon -->
     <color name="primary_blue">#2196F3</color>
     <color name="primary_blue_dark">#1976D2</color>
     <color name="primary_blue_light">#64B5F6</color>
-    <color name="accent_blue">#03A9F4</color>
-    <color name="accent_blue_dark">#0288D1</color>
+    <color name="accent_purple">#9C27B0</color>
+    <color name="accent_purple_dark">#7B1FA2</color>
+    <color name="accent_purple_light">#BA68C8</color>
 
     <!-- Legacy colors for compatibility -->
-    <color name="purple_200">#64B5F6</color>
-    <color name="purple_500">#2196F3</color>
-    <color name="purple_700">#1976D2</color>
-    <color name="teal_200">#03A9F4</color>
-    <color name="teal_700">#0288D1</color>
+    <color name="purple_200">#BA68C8</color>
+    <color name="purple_500">#9C27B0</color>
+    <color name="purple_700">#7B1FA2</color>
+    <color name="teal_200">#64B5F6</color>
+    <color name="teal_700">#1976D2</color>
+
+    <!-- UI element colors -->
+    <color name="border_color">#BDBDBD</color>
+    <color name="border_color_strong">#757575</color>
+    <color name="surface_variant">#F5F5F5</color>
 
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
