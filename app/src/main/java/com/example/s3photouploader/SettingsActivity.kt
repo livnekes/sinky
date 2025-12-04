@@ -31,20 +31,23 @@ class SettingsActivity : AppCompatActivity() {
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    // Permission launcher for reading photos
+    // Permission launcher for reading media
     private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
-            loadPhotoStats()
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val allGranted = permissions.values.all { it }
+        if (allGranted) {
+            loadMediaStats()
         } else {
             Toast.makeText(
                 this,
-                "Permission denied. Cannot access photo statistics.",
+                "Permission denied. Cannot access media statistics.",
                 Toast.LENGTH_SHORT
             ).show()
             binding.photoCountText.text = "Permission required"
             binding.storageUsedText.text = "Permission required"
+            binding.videoCountText.text = "Permission required"
+            binding.videoStorageUsedText.text = "Permission required"
         }
     }
 
@@ -136,38 +139,50 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun checkPermissionAndLoadStats() {
-        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            Manifest.permission.READ_MEDIA_IMAGES
+        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
         } else {
-            Manifest.permission.READ_EXTERNAL_STORAGE
+            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+
+        val allGranted = permissions.all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
         }
 
         when {
-            ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED -> {
-                loadPhotoStats()
+            allGranted -> {
+                loadMediaStats()
             }
             else -> {
-                permissionLauncher.launch(permission)
+                permissionLauncher.launch(permissions)
             }
         }
     }
 
-    private fun loadPhotoStats() {
+    private fun loadMediaStats() {
         binding.photoCountText.text = "Loading..."
         binding.storageUsedText.text = "Loading..."
+        binding.videoCountText.text = "Loading..."
+        binding.videoStorageUsedText.text = "Loading..."
 
         lifecycleScope.launch {
             try {
-                val stats = getPhotoStats()
-                binding.photoCountText.text = "${stats.count} photos"
-                binding.storageUsedText.text = formatBytes(stats.totalSize)
+                val photoStats = getPhotoStats()
+                binding.photoCountText.text = "${photoStats.count} photos"
+                binding.storageUsedText.text = formatBytes(photoStats.totalSize)
+
+                val videoStats = getVideoStats()
+                binding.videoCountText.text = "${videoStats.count} videos"
+                binding.videoStorageUsedText.text = formatBytes(videoStats.totalSize)
             } catch (e: Exception) {
-                android.util.Log.e("SettingsActivity", "Error loading photo stats", e)
+                android.util.Log.e("SettingsActivity", "Error loading media stats", e)
                 binding.photoCountText.text = "Error loading stats"
                 binding.storageUsedText.text = "Error"
+                binding.videoCountText.text = "Error loading stats"
+                binding.videoStorageUsedText.text = "Error"
                 Toast.makeText(
                     this@SettingsActivity,
-                    "Error loading photo statistics: ${e.message}",
+                    "Error loading media statistics: ${e.message}",
                     Toast.LENGTH_SHORT
                 ).show()
             }
@@ -200,6 +215,35 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         android.util.Log.d("SettingsActivity", "Found $count photos, total size: $totalSize bytes")
+        return@withContext PhotoStats(count, totalSize)
+    }
+
+    private suspend fun getVideoStats(): PhotoStats = withContext(Dispatchers.IO) {
+        var count = 0
+        var totalSize = 0L
+
+        val projection = arrayOf(
+            MediaStore.Video.Media._ID,
+            MediaStore.Video.Media.SIZE
+        )
+
+        contentResolver.query(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            projection,
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
+
+            while (cursor.moveToNext()) {
+                count++
+                val size = cursor.getLong(sizeColumn)
+                totalSize += size
+            }
+        }
+
+        android.util.Log.d("SettingsActivity", "Found $count videos, total size: $totalSize bytes")
         return@withContext PhotoStats(count, totalSize)
     }
 
