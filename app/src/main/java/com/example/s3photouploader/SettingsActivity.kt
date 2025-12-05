@@ -281,7 +281,7 @@ class SettingsActivity : AppCompatActivity() {
                     fetchCloudStatsFromLambda(lambdaEndpoint, securePrefix)
                 }
 
-                binding.cloudPhotoCountText.text = "${stats.objectCount} photos"
+                binding.cloudPhotoCountText.text = "${stats.objectCount} items"
                 binding.cloudStorageUsedText.text = formatBytes(stats.totalSize)
                 binding.refreshCloudStatsButton.isEnabled = true
 

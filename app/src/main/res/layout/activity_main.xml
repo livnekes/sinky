@@ -50,7 +50,7 @@
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Upload Photos"
+                        android:text="Upload Media"
                         android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                         android:layout_marginBottom="16dp" />
 
@@ -136,7 +136,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginBottom="16dp"
-                        android:text="Select Photos"
+                        android:text="Select Media"
                         app:icon="@android:drawable/ic_menu_gallery"
                         style="@style/Widget.Material3.Button.OutlinedButton" />
 
@@ -144,7 +144,7 @@
                         android:id="@+id/uploadButton"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="Upload Photos"
+                        android:text="Upload Media"
                         android:enabled="false"
                         app:icon="@android:drawable/ic_menu_upload"
                         style="@style/Widget.Material3.Button" />
