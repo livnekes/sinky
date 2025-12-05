@@ -81,8 +81,14 @@ class SettingsActivity : AppCompatActivity() {
             loadCloudStats()
         }
 
+        // Set up refresh Google stats button
+        binding.refreshGoogleStatsButton.setOnClickListener {
+            loadGoogleStats()
+        }
+
         checkPermissionAndLoadStats()
         loadCloudStats()
+        loadGoogleStats()
     }
 
     private fun showAccountPicker() {
@@ -281,7 +287,7 @@ class SettingsActivity : AppCompatActivity() {
                     fetchCloudStatsFromLambda(lambdaEndpoint, securePrefix)
                 }
 
-                binding.cloudPhotoCountText.text = "${stats.objectCount} photos"
+                binding.cloudPhotoCountText.text = "${stats.objectCount} items"
                 binding.cloudStorageUsedText.text = formatBytes(stats.totalSize)
                 binding.refreshCloudStatsButton.isEnabled = true
 
@@ -361,6 +367,55 @@ class SettingsActivity : AppCompatActivity() {
 
         val df = DecimalFormat("#.##")
         return "${df.format(size)} ${units[unitIndex]}"
+    }
+
+    private fun loadGoogleStats() {
+        if (!GoogleSignInHelper.isSignedIn(this)) {
+            binding.googleTotalStorageText.text = "Not signed in"
+            binding.googleUsedStorageText.text = "Not signed in"
+            binding.googleAvailableStorageText.text = "Not signed in"
+            binding.refreshGoogleStatsButton.isEnabled = true
+            return
+        }
+
+        binding.googleTotalStorageText.text = "Loading..."
+        binding.googleUsedStorageText.text = "Loading..."
+        binding.googleAvailableStorageText.text = "Loading..."
+        binding.refreshGoogleStatsButton.isEnabled = false
+
+        lifecycleScope.launch {
+            try {
+                val storageInfo = GooglePhotosStorageHelper.getStorageInfo(this@SettingsActivity)
+
+                if (storageInfo != null) {
+                    binding.googleTotalStorageText.text = formatBytes(storageInfo.totalBytes)
+                    binding.googleUsedStorageText.text = "${formatBytes(storageInfo.usedBytes)} (${String.format("%.1f", storageInfo.getUsedPercentage())}%)"
+                    binding.googleAvailableStorageText.text = formatBytes(storageInfo.getAvailableBytes())
+                } else {
+                    binding.googleTotalStorageText.text = "Error loading"
+                    binding.googleUsedStorageText.text = "Error loading"
+                    binding.googleAvailableStorageText.text = "Error loading"
+                    Toast.makeText(
+                        this@SettingsActivity,
+                        "Failed to load Google storage information",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+
+                binding.refreshGoogleStatsButton.isEnabled = true
+            } catch (e: Exception) {
+                android.util.Log.e("SettingsActivity", "Error loading Google stats", e)
+                binding.googleTotalStorageText.text = "Error loading"
+                binding.googleUsedStorageText.text = "Error loading"
+                binding.googleAvailableStorageText.text = "Error loading"
+                binding.refreshGoogleStatsButton.isEnabled = true
+                Toast.makeText(
+                    this@SettingsActivity,
+                    "Error loading Google statistics: ${e.message}",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
     }
 
     data class PhotoStats(val count: Int, val totalSize: Long)

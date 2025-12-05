@@ -16,6 +16,8 @@ import android.widget.Toast
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.common.api.ApiException
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.amazonaws.regions.Regions
@@ -59,26 +61,26 @@ class MainActivity : AppCompatActivity() {
             val deletedCount = photosToDelete.size
             Toast.makeText(
                 this,
-                "System confirmed deletion of $deletedCount photo(s)",
+                "System confirmed deletion of $deletedCount item(s)",
                 Toast.LENGTH_LONG
             ).show()
-            android.util.Log.d("MainActivity", "Successfully deleted $deletedCount photos: ${photosToDelete.joinToString()}")
+            android.util.Log.d("MainActivity", "Successfully deleted $deletedCount items: ${photosToDelete.joinToString()}")
             photosToDelete.clear()
         } else if (result.resultCode == Activity.RESULT_CANCELED) {
             Toast.makeText(
                 this,
-                "Photo deletion was cancelled by user",
+                "Deletion was cancelled by user",
                 Toast.LENGTH_LONG
             ).show()
-            android.util.Log.w("MainActivity", "Photo deletion cancelled by user (RESULT_CANCELED)")
+            android.util.Log.w("MainActivity", "Deletion cancelled by user (RESULT_CANCELED)")
             photosToDelete.clear()
         } else {
             Toast.makeText(
                 this,
-                "Photo deletion failed - result code: ${result.resultCode}",
+                "Deletion failed - result code: ${result.resultCode}",
                 Toast.LENGTH_LONG
             ).show()
-            android.util.Log.e("MainActivity", "Photo deletion failed with result code: ${result.resultCode}")
+            android.util.Log.e("MainActivity", "Deletion failed with result code: ${result.resultCode}")
             photosToDelete.clear()
         }
     }
@@ -108,7 +110,7 @@ class MainActivity : AppCompatActivity() {
                 // Show first image as preview
                 binding.imagePreview.setImageURI(selectedImageUris[0])
                 binding.uploadButton.isEnabled = true
-                binding.statusTextView.text = "${selectedImageUris.size} image(s) selected. Ready to upload."
+                binding.statusTextView.text = "${selectedImageUris.size} item(s) selected. Ready to upload."
             }
         }
     }
@@ -122,7 +124,7 @@ class MainActivity : AppCompatActivity() {
         } else {
             Toast.makeText(
                 this,
-                "Permission denied. Cannot access photos.",
+                "Permission denied. Cannot access media.",
                 Toast.LENGTH_SHORT
             ).show()
         }
@@ -150,14 +152,52 @@ class MainActivity : AppCompatActivity() {
             result.data?.getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME)?.let { email ->
                 AccountHelper.saveUserEmail(this, email)
                 binding.statusTextView.text = "Account set: $email"
-                Toast.makeText(this, "Photos will be uploaded to: $email", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Media will be uploaded to: $email", Toast.LENGTH_LONG).show()
             }
         } else {
             Toast.makeText(
                 this,
-                "No account selected. Photos will be uploaded to 'unknown' folder.",
+                "No account selected. Media will be uploaded to 'unknown' folder.",
                 Toast.LENGTH_SHORT
             ).show()
+        }
+    }
+
+    // Google Sign-In launcher
+    private val googleSignInLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        android.util.Log.d("MainActivity", "Sign-In result code: ${result.resultCode}")
+        if (result.resultCode == RESULT_OK) {
+            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+            try {
+                val account = task.getResult(ApiException::class.java)
+                android.util.Log.d("MainActivity", "Google Sign-In successful: ${account.email}")
+                Toast.makeText(
+                    this,
+                    "Signed in as ${account.email}",
+                    Toast.LENGTH_LONG
+                ).show()
+            } catch (e: ApiException) {
+                android.util.Log.e("MainActivity", "Google Sign-In ApiException - Status Code: ${e.statusCode}", e)
+                val errorMessage = when (e.statusCode) {
+                    10 -> "Developer error - Check OAuth configuration"
+                    12500 -> "Sign-In cancelled"
+                    12501 -> "Sign-In failed"
+                    else -> "Error code: ${e.statusCode}"
+                }
+                Toast.makeText(
+                    this,
+                    "Google Sign-In failed: $errorMessage",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        } else if (result.resultCode == RESULT_CANCELED) {
+            android.util.Log.w("MainActivity", "Google Sign-In cancelled by user")
+            Toast.makeText(this, "Sign-In cancelled", Toast.LENGTH_SHORT).show()
+        } else {
+            android.util.Log.e("MainActivity", "Google Sign-In unknown result code: ${result.resultCode}")
+            Toast.makeText(this, "Sign-In error: result code ${result.resultCode}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -172,7 +212,34 @@ class MainActivity : AppCompatActivity() {
 
         setupListeners()
         requestPermissionsIfNeeded()
+        promptForGoogleSignInIfNeeded()
         promptForAccountIfNeeded()
+    }
+
+    private fun promptForGoogleSignInIfNeeded() {
+        if (!GoogleSignInHelper.isSignedIn(this)) {
+            // Show Google Sign-In dialog
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Sign in with Google")
+                .setMessage("Please sign in with Google to access Google Photos storage information and enhanced features.")
+                .setPositiveButton("Sign In") { _, _ ->
+                    startGoogleSignIn()
+                }
+                .setNegativeButton("Skip") { _, _ ->
+                    Toast.makeText(
+                        this,
+                        "You can sign in later from Settings",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+                .setCancelable(false)
+                .show()
+        }
+    }
+
+    private fun startGoogleSignIn() {
+        val signInIntent = GoogleSignInHelper.getGoogleSignInClient(this).signInIntent
+        googleSignInLauncher.launch(signInIntent)
     }
 
     private fun requestPermissionsIfNeeded() {
@@ -316,12 +383,12 @@ class MainActivity : AppCompatActivity() {
                 binding.imagePreview.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
 
                 binding.uploadButton.isEnabled = true
-                binding.uploadButton.text = "Start Backup (${dateRangePhotos.size} photos)"
-                binding.statusTextView.text = "Found ${dateRangePhotos.size} photos. Ready to backup."
+                binding.uploadButton.text = "Start Backup (${dateRangePhotos.size} items)"
+                binding.statusTextView.text = "Found ${dateRangePhotos.size} item(s). Ready to backup."
             } else {
                 binding.uploadButton.isEnabled = false
                 binding.uploadButton.text = "Start Backup"
-                binding.statusTextView.text = "Select date range to backup photos"
+                binding.statusTextView.text = "Select date range to backup photos/videos"
             }
         } else {
             // Manual mode - clear date range photos
@@ -332,14 +399,14 @@ class MainActivity : AppCompatActivity() {
             binding.imagePreview.visibility = View.VISIBLE
 
             binding.uploadButton.isEnabled = selectedImageUris.isNotEmpty()
-            binding.uploadButton.text = "Upload Photos"
+            binding.uploadButton.text = "Upload Media"
 
             if (selectedImageUris.isEmpty()) {
                 binding.imagePreview.setImageResource(R.drawable.ic_image_placeholder)
                 binding.imagePreview.scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
-                binding.statusTextView.text = "Select photos to upload"
+                binding.statusTextView.text = "Select photos/videos to upload"
             } else {
-                binding.statusTextView.text = "${selectedImageUris.size} image(s) selected. Ready to upload."
+                binding.statusTextView.text = "${selectedImageUris.size} item(s) selected. Ready to upload."
             }
         }
     }
@@ -389,8 +456,8 @@ class MainActivity : AppCompatActivity() {
 
         // Query photos in background
         binding.uploadButton.isEnabled = false
-        binding.uploadButton.text = "Finding photos..."
-        binding.statusTextView.text = "Finding photos..."
+        binding.uploadButton.text = "Finding media..."
+        binding.statusTextView.text = "Finding media..."
 
         lifecycleScope.launch {
             try {
@@ -402,29 +469,29 @@ class MainActivity : AppCompatActivity() {
                 if (photoUris.isEmpty()) {
                     binding.imagePreview.setImageResource(R.drawable.ic_image_placeholder)
                     binding.imagePreview.scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
-                    binding.statusTextView.text = "No photos found in date range"
+                    binding.statusTextView.text = "No photos/videos found in date range"
                     binding.uploadButton.isEnabled = false
-                    binding.uploadButton.text = "Start Backup (0 photos)"
+                    binding.uploadButton.text = "Start Backup (0 items)"
                 } else {
                     // Show first image as preview
                     binding.imagePreview.setImageURI(photoUris[0])
                     binding.imagePreview.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
 
-                    binding.statusTextView.text = "Found ${photoUris.size} photos. Ready to backup."
+                    binding.statusTextView.text = "Found ${photoUris.size} item(s). Ready to backup."
                     binding.uploadButton.isEnabled = true
-                    binding.uploadButton.text = "Start Backup (${photoUris.size} photos)"
+                    binding.uploadButton.text = "Start Backup (${photoUris.size} items)"
                 }
 
             } catch (e: Exception) {
-                binding.statusTextView.text = "Error finding photos: ${e.message}"
+                binding.statusTextView.text = "Error finding media: ${e.message}"
                 binding.uploadButton.isEnabled = false
                 binding.uploadButton.text = "Start Backup"
                 Toast.makeText(
                     this@MainActivity,
-                    "Error finding photos: ${e.message}",
+                    "Error finding media: ${e.message}",
                     Toast.LENGTH_SHORT
                 ).show()
-                android.util.Log.e("MainActivity", "Error querying photos", e)
+                android.util.Log.e("MainActivity", "Error querying media", e)
             }
         }
     }
@@ -432,7 +499,7 @@ class MainActivity : AppCompatActivity() {
     private fun startDateRangeUpload() {
         // Check if we have photos to upload
         if (dateRangePhotos.isEmpty()) {
-            Toast.makeText(this, "No photos to backup", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "No media to backup", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -454,15 +521,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private suspend fun queryPhotosByDateRange(startMillis: Long, endMillis: Long): List<Uri> = withContext(Dispatchers.IO) {
-        val photoUris = mutableListOf<Uri>()
+        val mediaUris = mutableListOf<Uri>()
 
-        val projection = arrayOf(
+        // Query photos
+        val photoProjection = arrayOf(
             MediaStore.Images.Media._ID,
             MediaStore.Images.Media.DATE_TAKEN
         )
 
-        val selection = "${MediaStore.Images.Media.DATE_TAKEN} >= ? AND ${MediaStore.Images.Media.DATE_TAKEN} <= ?"
-        val selectionArgs = arrayOf(
+        val photoSelection = "${MediaStore.Images.Media.DATE_TAKEN} >= ? AND ${MediaStore.Images.Media.DATE_TAKEN} <= ?"
+        val photoSelectionArgs = arrayOf(
             startMillis.toString(),
             (endMillis + 86400000).toString() // Add 1 day in milliseconds
         )
@@ -471,9 +539,9 @@ class MainActivity : AppCompatActivity() {
 
         contentResolver.query(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            projection,
-            selection,
-            selectionArgs,
+            photoProjection,
+            photoSelection,
+            photoSelectionArgs,
             sortOrder
         )?.use { cursor ->
             val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
@@ -484,12 +552,45 @@ class MainActivity : AppCompatActivity() {
                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
                     id.toString()
                 )
-                photoUris.add(contentUri)
+                mediaUris.add(contentUri)
             }
         }
 
-        android.util.Log.d("MainActivity", "Found ${photoUris.size} photos")
-        return@withContext photoUris
+        // Query videos
+        val videoProjection = arrayOf(
+            MediaStore.Video.Media._ID,
+            MediaStore.Video.Media.DATE_TAKEN
+        )
+
+        val videoSelection = "${MediaStore.Video.Media.DATE_TAKEN} >= ? AND ${MediaStore.Video.Media.DATE_TAKEN} <= ?"
+        val videoSelectionArgs = arrayOf(
+            startMillis.toString(),
+            (endMillis + 86400000).toString() // Add 1 day in milliseconds
+        )
+
+        val videoSortOrder = "${MediaStore.Video.Media.DATE_TAKEN} ASC"
+
+        contentResolver.query(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            videoProjection,
+            videoSelection,
+            videoSelectionArgs,
+            videoSortOrder
+        )?.use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+
+            while (cursor.moveToNext()) {
+                val id = cursor.getLong(idColumn)
+                val contentUri = Uri.withAppendedPath(
+                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                    id.toString()
+                )
+                mediaUris.add(contentUri)
+            }
+        }
+
+        android.util.Log.d("MainActivity", "Found ${mediaUris.size} photos and videos")
+        return@withContext mediaUris
     }
 
     private fun isWifiConnected(): Boolean {
@@ -613,7 +714,7 @@ class MainActivity : AppCompatActivity() {
             android.util.Log.e("MainActivity", "No valid MediaStore URIs found for deletion")
             Toast.makeText(
                 this,
-                "Cannot delete: No valid photo URIs found (${urisToDelete.size} invalid)",
+                "Cannot delete: No valid URIs found (${urisToDelete.size} invalid)",
                 Toast.LENGTH_LONG
             ).show()
             return
@@ -649,13 +750,13 @@ class MainActivity : AppCompatActivity() {
                 if (successCount > 0) {
                     Toast.makeText(
                         this,
-                        "Deleted $successCount of ${validUris.size} photo(s) from device",
+                        "Deleted $successCount of ${validUris.size} item(s) from device",
                         Toast.LENGTH_SHORT
                     ).show()
                 } else {
                     Toast.makeText(
                         this,
-                        "Could not delete photos (permission denied)",
+                        "Could not delete items (permission denied)",
                         Toast.LENGTH_SHORT
                     ).show()
                 }
@@ -672,7 +773,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 Toast.makeText(
                     this,
-                    "Deleted $successCount of ${validUris.size} photo(s) from device",
+                    "Deleted $successCount of ${validUris.size} item(s) from device",
                     Toast.LENGTH_SHORT
                 ).show()
             }
@@ -680,21 +781,21 @@ class MainActivity : AppCompatActivity() {
             android.util.Log.e("MainActivity", "SecurityException requesting photo deletion", e)
             Toast.makeText(
                 this,
-                "Permission denied: Cannot delete photos (SecurityException)",
+                "Permission denied: Cannot delete items (SecurityException)",
                 Toast.LENGTH_LONG
             ).show()
         } catch (e: IllegalArgumentException) {
             android.util.Log.e("MainActivity", "IllegalArgumentException - Invalid URIs", e)
             Toast.makeText(
                 this,
-                "Error: Invalid photo URIs for deletion",
+                "Error: Invalid URIs for deletion",
                 Toast.LENGTH_LONG
             ).show()
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "Unexpected error requesting photo deletion", e)
             Toast.makeText(
                 this,
-                "Error deleting photos: ${e.javaClass.simpleName} - ${e.message}",
+                "Error deleting items: ${e.javaClass.simpleName} - ${e.message}",
                 Toast.LENGTH_LONG
             ).show()
         }
@@ -721,7 +822,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openImagePicker() {
-        val intent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
+        val intent = Intent(Intent.ACTION_GET_CONTENT)
+        intent.type = "*/*"
+        val mimeTypes = arrayOf("image/*", "video/*")
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
         intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
         imagePickerLauncher.launch(intent)
     }
@@ -787,7 +891,7 @@ class MainActivity : AppCompatActivity() {
         uploadJob = lifecycleScope.launch {
             try {
                 for ((index, imageUri) in imagesToUpload.withIndex()) {
-                    binding.statusTextView.text = "Uploading ${index + 1} of $totalImages to $userEmail..."
+                    binding.statusTextView.text = "Uploading ${index + 1} of $totalImages item(s) to $userEmail..."
 
                     try {
                         // Add 2 minute timeout per image upload
@@ -855,11 +959,11 @@ class MainActivity : AppCompatActivity() {
                     val statusMessage = if (skippedCount > 0) {
                         "Uploaded $uploadedCount, skipped $skippedCount (already uploaded)"
                     } else {
-                        "Successfully uploaded $uploadedCount image(s)"
+                        "Successfully uploaded $uploadedCount item(s)"
                     }
 
                     val deleteMessage = if (deleteAfterUpload && successfullyUploadedUris.isNotEmpty()) {
-                        ". Requesting deletion of ${successfullyUploadedUris.size} photo(s)..."
+                        ". Requesting deletion of ${successfullyUploadedUris.size} item(s)..."
                     } else {
                         ""
                     }
@@ -892,7 +996,7 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     val deleteMessage = if (deleteAfterUpload && successfullyUploadedUris.isNotEmpty()) {
-                        " Requesting deletion of ${successfullyUploadedUris.size} photo(s)..."
+                        " Requesting deletion of ${successfullyUploadedUris.size} item(s)..."
                     } else {
                         ""
                     }
