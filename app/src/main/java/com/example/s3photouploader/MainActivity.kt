@@ -218,23 +218,42 @@ class MainActivity : AppCompatActivity() {
 
     private fun promptForGoogleSignInIfNeeded() {
         if (!GoogleSignInHelper.isSignedIn(this)) {
-            // Show Google Sign-In dialog
+            // Disable all UI until signed in
+            disableUI()
+
+            // Show mandatory Google Sign-In dialog
             androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle("Sign in with Google")
-                .setMessage("Please sign in with Google to access Google Photos storage information and enhanced features.")
+                .setTitle("Sign in Required")
+                .setMessage("You must sign in with Google to use this app.")
                 .setPositiveButton("Sign In") { _, _ ->
                     startGoogleSignIn()
                 }
-                .setNegativeButton("Skip") { _, _ ->
-                    Toast.makeText(
-                        this,
-                        "You can sign in later from Settings",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
                 .setCancelable(false)
                 .show()
+        } else {
+            // User is signed in, enable UI
+            enableUI()
         }
+    }
+
+    private fun disableUI() {
+        binding.selectPhotoButton.isEnabled = false
+        binding.uploadButton.isEnabled = false
+        binding.retryButton.isEnabled = false
+        binding.modeToggleGroup.isEnabled = false
+        binding.manualModeButton.isEnabled = false
+        binding.dateRangeModeButton.isEnabled = false
+        binding.startDateButton.isEnabled = false
+        binding.endDateButton.isEnabled = false
+        binding.statusTextView.text = "Please sign in with Google to continue"
+    }
+
+    private fun enableUI() {
+        binding.modeToggleGroup.isEnabled = true
+        binding.manualModeButton.isEnabled = true
+        binding.dateRangeModeButton.isEnabled = true
+        // Other buttons will be enabled based on selection state
+        updateUIForMode()
     }
 
     private fun startGoogleSignIn() {
