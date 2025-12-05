@@ -13,4 +13,7 @@
 
     <!-- Lambda API Configuration -->
     <string name="lambda_stats_endpoint">https://ds46wubfahfyujbby2oegvamfm0flqqm.lambda-url.eu-central-1.on.aws/</string>
+
+    <!-- Google OAuth Configuration -->
+    <string name="google_web_client_id">472028261324-blj3024ll1lkmgjsu6cvrif0gopnsio7.apps.googleusercontent.com</string>
 </resources>

@@ -16,6 +16,8 @@ import android.widget.Toast
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.common.api.ApiException
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.amazonaws.regions.Regions
@@ -161,6 +163,44 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Google Sign-In launcher
+    private val googleSignInLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        android.util.Log.d("MainActivity", "Sign-In result code: ${result.resultCode}")
+        if (result.resultCode == RESULT_OK) {
+            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+            try {
+                val account = task.getResult(ApiException::class.java)
+                android.util.Log.d("MainActivity", "Google Sign-In successful: ${account.email}")
+                Toast.makeText(
+                    this,
+                    "Signed in as ${account.email}",
+                    Toast.LENGTH_LONG
+                ).show()
+            } catch (e: ApiException) {
+                android.util.Log.e("MainActivity", "Google Sign-In ApiException - Status Code: ${e.statusCode}", e)
+                val errorMessage = when (e.statusCode) {
+                    10 -> "Developer error - Check OAuth configuration"
+                    12500 -> "Sign-In cancelled"
+                    12501 -> "Sign-In failed"
+                    else -> "Error code: ${e.statusCode}"
+                }
+                Toast.makeText(
+                    this,
+                    "Google Sign-In failed: $errorMessage",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        } else if (result.resultCode == RESULT_CANCELED) {
+            android.util.Log.w("MainActivity", "Google Sign-In cancelled by user")
+            Toast.makeText(this, "Sign-In cancelled", Toast.LENGTH_SHORT).show()
+        } else {
+            android.util.Log.e("MainActivity", "Google Sign-In unknown result code: ${result.resultCode}")
+            Toast.makeText(this, "Sign-In error: result code ${result.resultCode}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -172,7 +212,34 @@ class MainActivity : AppCompatActivity() {
 
         setupListeners()
         requestPermissionsIfNeeded()
+        promptForGoogleSignInIfNeeded()
         promptForAccountIfNeeded()
+    }
+
+    private fun promptForGoogleSignInIfNeeded() {
+        if (!GoogleSignInHelper.isSignedIn(this)) {
+            // Show Google Sign-In dialog
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Sign in with Google")
+                .setMessage("Please sign in with Google to access Google Photos storage information and enhanced features.")
+                .setPositiveButton("Sign In") { _, _ ->
+                    startGoogleSignIn()
+                }
+                .setNegativeButton("Skip") { _, _ ->
+                    Toast.makeText(
+                        this,
+                        "You can sign in later from Settings",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+                .setCancelable(false)
+                .show()
+        }
+    }
+
+    private fun startGoogleSignIn() {
+        val signInIntent = GoogleSignInHelper.getGoogleSignInClient(this).signInIntent
+        googleSignInLauncher.launch(signInIntent)
     }
 
     private fun requestPermissionsIfNeeded() {
