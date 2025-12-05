@@ -11,25 +11,20 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.amazonaws.auth.CognitoCachingCredentialsProvider
+import com.amazonaws.regions.Region
+import com.amazonaws.regions.Regions
+import com.amazonaws.services.s3.AmazonS3Client
+import com.amazonaws.services.s3.model.ListObjectsV2Request
 import com.example.s3photouploader.databinding.ActivitySettingsBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
 import java.text.DecimalFormat
-import java.util.concurrent.TimeUnit
 
 class SettingsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySettingsBinding
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
 
     // Permission launcher for reading media
     private val permissionLauncher = registerForActivityResult(
@@ -60,13 +55,13 @@ class SettingsActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = "Settings"
 
-        // Display account email
-        val userEmail = AccountHelper.getUserEmail(this)
-        binding.accountEmailText.text = userEmail ?: "Not set"
+        // Display Google account email
+        val googleAccount = GoogleSignInHelper.getSignedInAccount(this)
+        binding.accountEmailText.text = googleAccount?.email ?: "Not signed in"
 
-        // Set up Change Account button
-        binding.changeAccountButton.setOnClickListener {
-            showAccountPicker()
+        // Set up Disconnect button
+        binding.disconnectButton.setOnClickListener {
+            handleDisconnect()
         }
 
         // Set up delete after upload switch
@@ -91,37 +86,23 @@ class SettingsActivity : AppCompatActivity() {
         loadGoogleStats()
     }
 
-    private fun showAccountPicker() {
-        try {
-            val intent = android.accounts.AccountManager.newChooseAccountIntent(
-                null, // selectedAccount
-                null, // allowableAccounts
-                arrayOf("com.google"), // allowableAccountTypes - Google accounts only
-                null, // descriptionOverrideText
-                null, // addAccountAuthTokenType
-                null, // addAccountRequiredFeatures
-                null  // addAccountOptions
-            )
-            startActivityForResult(intent, REQUEST_ACCOUNT_PICKER)
-        } catch (e: Exception) {
-            Toast.makeText(this, "Failed to open account picker: ${e.message}", Toast.LENGTH_SHORT).show()
-            android.util.Log.e("SettingsActivity", "Failed to open account picker", e)
-        }
-    }
+    private fun handleDisconnect() {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Disconnect Account")
+            .setMessage("Are you sure you want to disconnect your Google account? You will need to sign in again to use the app.")
+            .setPositiveButton("Disconnect") { _, _ ->
+                GoogleSignInHelper.signOut(this) {
+                    // Clear saved data
+                    AccountHelper.clearUserData(this)
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_ACCOUNT_PICKER && resultCode == RESULT_OK) {
-            data?.getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME)?.let { email ->
-                AccountHelper.saveUserEmail(this, email)
-                binding.accountEmailText.text = email
-                Toast.makeText(this, "Account changed to: $email", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "Disconnected successfully", Toast.LENGTH_SHORT).show()
+
+                    // Go back to MainActivity which will prompt for sign-in
+                    finish()
+                }
             }
-        }
-    }
-
-    companion object {
-        private const val REQUEST_ACCOUNT_PICKER = 1001
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     override fun onResume() {
@@ -268,23 +249,14 @@ class SettingsActivity : AppCompatActivity() {
                     return@launch
                 }
 
-                val lambdaEndpoint = getString(R.string.lambda_stats_endpoint)
-
-                // Check if endpoint is configured
-                if (lambdaEndpoint.contains("your-lambda-url")) {
-                    binding.cloudPhotoCountText.text = "Not configured"
-                    binding.cloudStorageUsedText.text = "N/A"
-                    binding.refreshCloudStatsButton.isEnabled = true
-                    Toast.makeText(
-                        this@SettingsActivity,
-                        "Please configure lambda_stats_endpoint in strings.xml",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    return@launch
-                }
+                // Get AWS config from strings.xml
+                val bucketName = getString(R.string.aws_bucket_name)
+                val regionStr = getString(R.string.aws_region)
+                val identityPoolId = getString(R.string.aws_identity_pool_id)
+                val region = Regions.fromName(regionStr)
 
                 val stats = withContext(Dispatchers.IO) {
-                    fetchCloudStatsFromLambda(lambdaEndpoint, securePrefix)
+                    fetchCloudStatsFromS3(bucketName, region, identityPoolId, securePrefix)
                 }
 
                 binding.cloudPhotoCountText.text = "${stats.objectCount} items"
@@ -306,51 +278,53 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     /**
-     * Calls Lambda function to get cloud storage statistics
-     *
-     * Expected Lambda request:
-     * POST /stats
-     * Content-Type: application/json
-     * Body: {"prefix": "email_guid"}
-     *
-     * Expected Lambda response:
-     * {
-     *   "objectCount": 123,
-     *   "totalSize": 1234567890
-     * }
+     * Fetches cloud storage statistics directly from S3
+     * Lists all objects with the user's prefix and calculates count and total size
      */
-    private fun fetchCloudStatsFromLambda(endpoint: String, prefix: String): CloudStorageStats {
-        // Create JSON request body
-        val requestBody = JSONObject().apply {
-            put("prefix", prefix)
-        }.toString()
+    private fun fetchCloudStatsFromS3(
+        bucketName: String,
+        region: Regions,
+        identityPoolId: String,
+        prefix: String
+    ): CloudStorageStats {
+        android.util.Log.d("SettingsActivity", "Fetching cloud stats from S3 with prefix: $prefix")
 
-        android.util.Log.d("SettingsActivity", "Calling Lambda endpoint: $endpoint with prefix: $prefix")
+        // Create Cognito credentials provider
+        val credentialsProvider = CognitoCachingCredentialsProvider(
+            this,
+            identityPoolId,
+            region
+        )
 
-        // Create HTTP request
-        val request = Request.Builder()
-            .url(endpoint)
-            .post(requestBody.toRequestBody("application/json".toMediaType()))
-            .build()
+        // Create S3 client
+        val s3Client = AmazonS3Client(credentialsProvider, Region.getRegion(region))
 
-        // Execute request
-        httpClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw Exception("Lambda returned error: ${response.code} ${response.message}")
+        var objectCount = 0
+        var totalSize = 0L
+        var continuationToken: String? = null
+
+        do {
+            // Create list request
+            val listRequest = ListObjectsV2Request()
+                .withBucketName(bucketName)
+                .withPrefix(prefix)
+                .withContinuationToken(continuationToken)
+
+            // Execute list request
+            val result = s3Client.listObjectsV2(listRequest)
+
+            // Count objects and sum sizes
+            result.objectSummaries?.forEach { obj ->
+                objectCount++
+                totalSize += obj.size
             }
 
-            val responseBody = response.body?.string()
-                ?: throw Exception("Empty response from Lambda")
+            continuationToken = result.nextContinuationToken
+        } while (continuationToken != null)
 
-            android.util.Log.d("SettingsActivity", "Lambda response: $responseBody")
+        android.util.Log.d("SettingsActivity", "Found $objectCount objects, total size: $totalSize bytes")
 
-            // Parse JSON response
-            val json = JSONObject(responseBody)
-            val objectCount = json.getInt("objectCount")
-            val totalSize = json.getLong("totalSize")
-
-            return CloudStorageStats(objectCount, totalSize)
-        }
+        return CloudStorageStats(objectCount, totalSize)
     }
 
     private fun formatBytes(bytes: Long): String {

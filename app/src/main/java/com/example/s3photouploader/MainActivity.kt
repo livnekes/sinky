@@ -30,6 +30,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.CancellationException
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -144,24 +146,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Account picker launcher
-    private val accountPickerLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == RESULT_OK) {
-            result.data?.getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME)?.let { email ->
-                AccountHelper.saveUserEmail(this, email)
-                binding.statusTextView.text = "Account set: $email"
-                Toast.makeText(this, "Media will be uploaded to: $email", Toast.LENGTH_LONG).show()
-            }
-        } else {
-            Toast.makeText(
-                this,
-                "No account selected. Media will be uploaded to 'unknown' folder.",
-                Toast.LENGTH_SHORT
-            ).show()
-        }
-    }
 
     // Google Sign-In launcher
     private val googleSignInLauncher = registerForActivityResult(
@@ -173,6 +157,18 @@ class MainActivity : AppCompatActivity() {
             try {
                 val account = task.getResult(ApiException::class.java)
                 android.util.Log.d("MainActivity", "Google Sign-In successful: ${account.email}")
+
+                // Save email and set S3 prefix to email
+                account.email?.let { email ->
+                    AccountHelper.saveUserEmail(this, email)
+                    // Use email directly as S3 prefix
+                    AccountHelper.saveS3Prefix(this, email)
+                    android.util.Log.d("MainActivity", "S3 prefix set to: $email")
+                }
+
+                // Enable UI after successful sign-in
+                enableUI()
+
                 Toast.makeText(
                     this,
                     "Signed in as ${account.email}",
@@ -213,7 +209,7 @@ class MainActivity : AppCompatActivity() {
         setupListeners()
         requestPermissionsIfNeeded()
         promptForGoogleSignInIfNeeded()
-        promptForAccountIfNeeded()
+        updateStatusWithAccount()
     }
 
     private fun promptForGoogleSignInIfNeeded() {
@@ -279,33 +275,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun promptForAccountIfNeeded() {
-        val savedEmail = AccountHelper.getUserEmail(this)
-        if (savedEmail == null) {
-            // First time - show account picker
-            showAccountPicker()
-        } else {
-            binding.statusTextView.text = "Uploading to: $savedEmail"
+    private fun updateStatusWithAccount() {
+        val googleAccount = GoogleSignInHelper.getSignedInAccount(this)
+        if (googleAccount != null) {
+            binding.statusTextView.text = "Uploading to: ${googleAccount.email}"
         }
     }
 
-    private fun showAccountPicker() {
-        try {
-            val intent = android.accounts.AccountManager.newChooseAccountIntent(
-                null, // selectedAccount
-                null, // allowableAccounts
-                arrayOf("com.google"), // allowableAccountTypes - Google accounts only
-                null, // descriptionOverrideText
-                null, // addAccountAuthTokenType
-                null, // addAccountRequiredFeatures
-                null  // addAccountOptions
-            )
-            accountPickerLauncher.launch(intent)
-        } catch (e: Exception) {
-            Toast.makeText(this, "Failed to open account picker: ${e.message}", Toast.LENGTH_SHORT).show()
-            android.util.Log.e("MainActivity", "Failed to open account picker", e)
-        }
-    }
 
     override fun onCreateOptionsMenu(menu: android.view.Menu?): Boolean {
         menuInflater.inflate(R.menu.main_menu, menu)
