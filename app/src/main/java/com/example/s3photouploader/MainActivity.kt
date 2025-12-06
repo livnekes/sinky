@@ -191,8 +191,11 @@ class MainActivity : AppCompatActivity() {
                                 android.util.Log.d("MainActivity", "S3 prefix set to: $email")
                             }
 
-                            // Enable UI after successful sign-in
-                            enableUI()
+                            // Enable UI after successful sign-in (on main thread)
+                            withContext(Dispatchers.Main) {
+                                enableUI()
+                                updateStatusWithAccount()
+                            }
 
                             Toast.makeText(
                                 this@MainActivity,
@@ -349,11 +352,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun enableUI() {
+        android.util.Log.d("MainActivity", "enableUI() called")
         binding.modeToggleGroup.isEnabled = true
         binding.manualModeButton.isEnabled = true
         binding.dateRangeModeButton.isEnabled = true
+        android.util.Log.d("MainActivity", "Mode buttons enabled, calling updateUIForMode()")
         // Other buttons will be enabled based on selection state
         updateUIForMode()
+        android.util.Log.d("MainActivity", "enableUI() completed - selectPhotoButton.isEnabled = ${binding.selectPhotoButton.isEnabled}, startDateButton.isEnabled = ${binding.startDateButton.isEnabled}")
     }
 
     private fun startGoogleSignIn() {
@@ -470,7 +476,10 @@ class MainActivity : AppCompatActivity() {
         if (isDateRangeMode) {
             // Date range mode
             binding.selectPhotoButton.visibility = View.GONE
+            binding.selectPhotoButton.isEnabled = false
             binding.datePickerSection.visibility = View.VISIBLE
+            binding.startDateButton.isEnabled = true
+            binding.endDateButton.isEnabled = true
             binding.imagePreview.visibility = View.VISIBLE
             binding.imagePreview.setImageResource(R.drawable.ic_image_placeholder)
             binding.imagePreview.scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
@@ -494,7 +503,10 @@ class MainActivity : AppCompatActivity() {
             dateRangePhotos.clear()
 
             binding.selectPhotoButton.visibility = View.VISIBLE
+            binding.selectPhotoButton.isEnabled = true
             binding.datePickerSection.visibility = View.GONE
+            binding.startDateButton.isEnabled = false
+            binding.endDateButton.isEnabled = false
             binding.imagePreview.visibility = View.VISIBLE
 
             binding.uploadButton.isEnabled = selectedImageUris.isNotEmpty()
