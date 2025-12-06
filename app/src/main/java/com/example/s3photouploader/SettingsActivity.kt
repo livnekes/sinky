@@ -308,11 +308,25 @@ class SettingsActivity : AppCompatActivity() {
 
         android.util.Log.d("SettingsActivity", "Calling Lambda endpoint: $endpoint with prefix: $prefix, email: $userEmail")
 
-        // Create HTTP request
-        val request = Request.Builder()
-            .url(endpoint)
-            .post(requestBody.toRequestBody("application/json".toMediaType()))
-            .build()
+        // Get Cognito credentials provider for signing
+        val credentialsProvider = CognitoAuthManager.getCredentialsProvider()
+            ?: throw Exception("Not authenticated with Cognito")
+
+        // Refresh credentials before making the request
+        CognitoAuthManager.refreshCredentialsIfNeeded()
+
+        // Get AWS region
+        val region = getString(R.string.aws_region)
+
+        // Create signed HTTP request with IAM auth
+        val request = AwsSignedRequestHelper.createSignedPostRequest(
+            url = endpoint,
+            jsonBody = requestBody,
+            credentialsProvider = credentialsProvider,
+            region = region
+        )
+
+        android.util.Log.d("SettingsActivity", "Request signed with AWS Signature V4")
 
         // Execute request
         httpClient.newCall(request).execute().use { response ->
