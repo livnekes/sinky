@@ -287,7 +287,7 @@ class SettingsActivity : AppCompatActivity() {
      * Expected Lambda request:
      * POST /stats
      * Content-Type: application/json
-     * Body: {"prefix": "email_guid"}
+     * Body: {"prefix": "email_cognitoId", "email": "user@example.com"}
      *
      * Expected Lambda response:
      * {
@@ -296,12 +296,17 @@ class SettingsActivity : AppCompatActivity() {
      * }
      */
     private fun fetchCloudStatsFromLambda(endpoint: String, prefix: String): CloudStorageStats {
+        // Get user email for verification
+        val userEmail = AccountHelper.getUserEmail(this)
+            ?: throw Exception("User email not found")
+
         // Create JSON request body
         val requestBody = JSONObject().apply {
             put("prefix", prefix)
+            put("email", userEmail)
         }.toString()
 
-        android.util.Log.d("SettingsActivity", "Calling Lambda endpoint: $endpoint with prefix: $prefix")
+        android.util.Log.d("SettingsActivity", "Calling Lambda endpoint: $endpoint with prefix: $prefix, email: $userEmail")
 
         // Create HTTP request
         val request = Request.Builder()

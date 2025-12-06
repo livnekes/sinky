@@ -83,12 +83,27 @@ object AccountHelper {
     }
 
     /**
-     * Gets the secure upload prefix
-     * If S3 prefix exists (from account), return it
-     * Otherwise, create email_guid format
+     * Clears the saved S3 prefix
+     * This forces regeneration of the prefix using email + Cognito Identity ID
      *
      * @param context Application context
-     * @return S3 prefix in format: email or email_guid
+     */
+    fun clearSavedPrefix(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().remove(KEY_S3_PREFIX).apply()
+        android.util.Log.d("AccountHelper", "Cleared saved S3 prefix")
+    }
+
+    /**
+     * Gets the secure upload prefix
+     * If S3 prefix exists (from account), return it
+     * Otherwise, create email_cognitoIdentityId format
+     *
+     * Uses Cognito Identity ID as the GUID for stability across app reinstalls.
+     * The same Google account always gets the same Cognito Identity ID.
+     *
+     * @param context Application context
+     * @return S3 prefix in format: email or email_cognitoIdentityId
      */
     fun getSecureUploadPrefix(context: Context): String? {
         // If we have a saved S3 prefix (from account), use it
@@ -97,8 +112,20 @@ object AccountHelper {
             return savedPrefix
         }
 
-        // Otherwise, create email_guid format
+        // Otherwise, create email_cognitoIdentityId format
         val email = getUserEmail(context) ?: return null
+
+        // Use Cognito Identity ID as the GUID for stability
+        // This ensures the same prefix across app reinstalls
+        val cognitoIdentityId = getCognitoIdentityId(context)
+        if (cognitoIdentityId != null) {
+            android.util.Log.d("AccountHelper", "Using Cognito Identity ID as GUID: $cognitoIdentityId")
+            return "${email}_${cognitoIdentityId}"
+        }
+
+        // Fallback to random GUID if Cognito ID not available
+        // (This shouldn't happen in normal flow)
+        android.util.Log.w("AccountHelper", "Cognito Identity ID not available, using random GUID")
         val guid = getUserGuid(context)
         return "${email}_${guid}"
     }

@@ -183,12 +183,12 @@ class MainActivity : AppCompatActivity() {
 
                             android.util.Log.d("MainActivity", "Successfully authenticated with Cognito")
 
-                            // Save email and set S3 prefix to email
+                            // Save email (prefix will be generated from email + Cognito Identity ID)
                             account.email?.let { email ->
                                 AccountHelper.saveUserEmail(this@MainActivity, email)
-                                // Use email directly as S3 prefix
-                                AccountHelper.saveS3Prefix(this@MainActivity, email)
-                                android.util.Log.d("MainActivity", "S3 prefix set to: $email")
+                                // Clear any old saved prefix so it regenerates with Cognito Identity ID
+                                AccountHelper.clearSavedPrefix(this@MainActivity)
+                                android.util.Log.d("MainActivity", "User email saved: $email, old prefix cleared")
                             }
 
                             // Enable UI after successful sign-in (on main thread)
