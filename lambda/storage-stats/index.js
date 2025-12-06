@@ -3,9 +3,47 @@ import { S3Client, ListObjectsV2Command } from "@aws-sdk/client-s3";
 const s3Client = new S3Client({ region: "eu-central-1" });
 const BUCKET_NAME = "photos-sinky";
 
+/**
+ * Extract Cognito Identity ID from prefix
+ * Supports two formats:
+ * - email@example.com (legacy direct email - no Cognito ID)
+ * - email@example.com_cognitoIdentityId (email with Cognito Identity ID)
+ *
+ * Returns the Cognito Identity ID part after the underscore, or null if not found
+ */
+function extractCognitoIdFromPrefix(prefix) {
+    if (prefix.includes('_')) {
+        const parts = prefix.split('_');
+        // Cognito Identity ID is after the underscore (format: region:uuid)
+        return parts[1] || null;
+    }
+    return null;
+}
+
 export const handler = async (event) => {
     try {
         console.log("Received event:", JSON.stringify(event, null, 2));
+
+        // Get Cognito Identity ID from request context (set by IAM authenticator)
+        const requestCognitoIdentityId = event.requestContext?.identity?.cognitoIdentityId;
+        const requestIdentityPoolId = event.requestContext?.identity?.cognitoIdentityPoolId;
+
+        console.log(`Request from Cognito Identity: ${requestCognitoIdentityId}`);
+        console.log(`Identity Pool: ${requestIdentityPoolId}`);
+
+        if (!requestCognitoIdentityId) {
+            console.error("No Cognito Identity ID found in request context");
+            return {
+                statusCode: 401,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({
+                    error: 'Unauthorized - No authenticated Cognito identity'
+                })
+            };
+        }
 
         // Parse request body
         let body;
@@ -30,7 +68,26 @@ export const handler = async (event) => {
             };
         }
 
-        console.log(`Listing objects with prefix: ${prefix}`);
+        // Extract Cognito Identity ID from the prefix
+        const prefixCognitoId = extractCognitoIdFromPrefix(prefix);
+        console.log(`Cognito ID from prefix: ${prefixCognitoId}`);
+
+        // Verify that the Cognito Identity ID in the prefix matches the authenticated user
+        if (prefixCognitoId && prefixCognitoId !== requestCognitoIdentityId) {
+            console.error(`Cognito Identity ID mismatch: prefix=${prefixCognitoId}, request=${requestCognitoIdentityId}`);
+            return {
+                statusCode: 403,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({
+                    error: 'Forbidden - You can only access your own statistics'
+                })
+            };
+        }
+
+        console.log(`Cognito Identity verification passed. Listing objects with prefix: ${prefix}`);
 
         let objectCount = 0;
         let totalSize = 0;

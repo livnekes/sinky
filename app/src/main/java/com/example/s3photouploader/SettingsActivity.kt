@@ -60,13 +60,13 @@ class SettingsActivity : AppCompatActivity() {
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = "Settings"
 
-        // Display account email
-        val userEmail = AccountHelper.getUserEmail(this)
-        binding.accountEmailText.text = userEmail ?: "Not set"
+        // Display Google account email
+        val googleAccount = GoogleSignInHelper.getSignedInAccount(this)
+        binding.accountEmailText.text = googleAccount?.email ?: "Not signed in"
 
-        // Set up Change Account button
-        binding.changeAccountButton.setOnClickListener {
-            showAccountPicker()
+        // Set up Disconnect button
+        binding.disconnectButton.setOnClickListener {
+            handleDisconnect()
         }
 
         // Set up delete after upload switch
@@ -91,37 +91,26 @@ class SettingsActivity : AppCompatActivity() {
         loadGoogleStats()
     }
 
-    private fun showAccountPicker() {
-        try {
-            val intent = android.accounts.AccountManager.newChooseAccountIntent(
-                null, // selectedAccount
-                null, // allowableAccounts
-                arrayOf("com.google"), // allowableAccountTypes - Google accounts only
-                null, // descriptionOverrideText
-                null, // addAccountAuthTokenType
-                null, // addAccountRequiredFeatures
-                null  // addAccountOptions
-            )
-            startActivityForResult(intent, REQUEST_ACCOUNT_PICKER)
-        } catch (e: Exception) {
-            Toast.makeText(this, "Failed to open account picker: ${e.message}", Toast.LENGTH_SHORT).show()
-            android.util.Log.e("SettingsActivity", "Failed to open account picker", e)
-        }
-    }
+    private fun handleDisconnect() {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Disconnect Account")
+            .setMessage("Are you sure you want to disconnect your Google account? You will need to sign in again to use the app.")
+            .setPositiveButton("Disconnect") { _, _ ->
+                GoogleSignInHelper.signOut(this) {
+                    // Clear Cognito credentials
+                    CognitoAuthManager.signOut()
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_ACCOUNT_PICKER && resultCode == RESULT_OK) {
-            data?.getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME)?.let { email ->
-                AccountHelper.saveUserEmail(this, email)
-                binding.accountEmailText.text = email
-                Toast.makeText(this, "Account changed to: $email", Toast.LENGTH_LONG).show()
+                    // Clear saved data
+                    AccountHelper.clearUserData(this)
+
+                    Toast.makeText(this, "Disconnected successfully", Toast.LENGTH_SHORT).show()
+
+                    // Go back to MainActivity which will prompt for sign-in
+                    finish()
+                }
             }
-        }
-    }
-
-    companion object {
-        private const val REQUEST_ACCOUNT_PICKER = 1001
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     override fun onResume() {
@@ -270,19 +259,6 @@ class SettingsActivity : AppCompatActivity() {
 
                 val lambdaEndpoint = getString(R.string.lambda_stats_endpoint)
 
-                // Check if endpoint is configured
-                if (lambdaEndpoint.contains("your-lambda-url")) {
-                    binding.cloudPhotoCountText.text = "Not configured"
-                    binding.cloudStorageUsedText.text = "N/A"
-                    binding.refreshCloudStatsButton.isEnabled = true
-                    Toast.makeText(
-                        this@SettingsActivity,
-                        "Please configure lambda_stats_endpoint in strings.xml",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    return@launch
-                }
-
                 val stats = withContext(Dispatchers.IO) {
                     fetchCloudStatsFromLambda(lambdaEndpoint, securePrefix)
                 }
@@ -311,7 +287,7 @@ class SettingsActivity : AppCompatActivity() {
      * Expected Lambda request:
      * POST /stats
      * Content-Type: application/json
-     * Body: {"prefix": "email_guid"}
+     * Body: {"prefix": "email_cognitoId", "email": "user@example.com"}
      *
      * Expected Lambda response:
      * {
@@ -320,18 +296,37 @@ class SettingsActivity : AppCompatActivity() {
      * }
      */
     private fun fetchCloudStatsFromLambda(endpoint: String, prefix: String): CloudStorageStats {
+        // Get user email for verification
+        val userEmail = AccountHelper.getUserEmail(this)
+            ?: throw Exception("User email not found")
+
         // Create JSON request body
         val requestBody = JSONObject().apply {
             put("prefix", prefix)
+            put("email", userEmail)
         }.toString()
 
-        android.util.Log.d("SettingsActivity", "Calling Lambda endpoint: $endpoint with prefix: $prefix")
+        android.util.Log.d("SettingsActivity", "Calling Lambda endpoint: $endpoint with prefix: $prefix, email: $userEmail")
 
-        // Create HTTP request
-        val request = Request.Builder()
-            .url(endpoint)
-            .post(requestBody.toRequestBody("application/json".toMediaType()))
-            .build()
+        // Get Cognito credentials provider for signing
+        val credentialsProvider = CognitoAuthManager.getCredentialsProvider()
+            ?: throw Exception("Not authenticated with Cognito")
+
+        // Refresh credentials before making the request
+        CognitoAuthManager.refreshCredentialsIfNeeded()
+
+        // Get AWS region
+        val region = getString(R.string.aws_region)
+
+        // Create signed HTTP request with IAM auth
+        val request = AwsSignedRequestHelper.createSignedPostRequest(
+            url = endpoint,
+            jsonBody = requestBody,
+            credentialsProvider = credentialsProvider,
+            region = region
+        )
+
+        android.util.Log.d("SettingsActivity", "Request signed with AWS Signature V4")
 
         // Execute request
         httpClient.newCall(request).execute().use { response ->

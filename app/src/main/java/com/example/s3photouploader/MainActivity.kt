@@ -30,6 +30,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.CancellationException
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -41,6 +43,7 @@ class MainActivity : AppCompatActivity() {
     private val failedImageUris = mutableListOf<Uri>()
     private lateinit var s3Uploader: CognitoS3Uploader
     private var uploadJob: Job? = null
+    private var isSignInDialogShowing = false
 
     // Date range for backup mode
     private var startDateMillis: Long? = null
@@ -144,24 +147,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Account picker launcher
-    private val accountPickerLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == RESULT_OK) {
-            result.data?.getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME)?.let { email ->
-                AccountHelper.saveUserEmail(this, email)
-                binding.statusTextView.text = "Account set: $email"
-                Toast.makeText(this, "Media will be uploaded to: $email", Toast.LENGTH_LONG).show()
-            }
-        } else {
-            Toast.makeText(
-                this,
-                "No account selected. Media will be uploaded to 'unknown' folder.",
-                Toast.LENGTH_SHORT
-            ).show()
-        }
-    }
 
     // Google Sign-In launcher
     private val googleSignInLauncher = registerForActivityResult(
@@ -173,11 +158,67 @@ class MainActivity : AppCompatActivity() {
             try {
                 val account = task.getResult(ApiException::class.java)
                 android.util.Log.d("MainActivity", "Google Sign-In successful: ${account.email}")
-                Toast.makeText(
-                    this,
-                    "Signed in as ${account.email}",
-                    Toast.LENGTH_LONG
-                ).show()
+
+                // Get Google ID token
+                val idToken = account.idToken
+                android.util.Log.d("MainActivity", "ID token retrieved: ${if (idToken != null) "Yes (${idToken.length} chars)" else "No"}")
+
+                if (idToken != null) {
+                    // Authenticate with Cognito using Google ID token
+                    lifecycleScope.launch {
+                        try {
+                            val identityPoolId = getString(R.string.aws_identity_pool_id)
+                            val regionStr = getString(R.string.aws_region)
+                            val region = Regions.fromName(regionStr)
+
+                            // Exchange Google token for Cognito credentials
+                            withContext(Dispatchers.IO) {
+                                CognitoAuthManager.authenticateWithGoogle(
+                                    this@MainActivity,
+                                    idToken,
+                                    identityPoolId,
+                                    region
+                                )
+                            }
+
+                            android.util.Log.d("MainActivity", "Successfully authenticated with Cognito")
+
+                            // Save email (prefix will be generated from email + Cognito Identity ID)
+                            account.email?.let { email ->
+                                AccountHelper.saveUserEmail(this@MainActivity, email)
+                                // Clear any old saved prefix so it regenerates with Cognito Identity ID
+                                AccountHelper.clearSavedPrefix(this@MainActivity)
+                                android.util.Log.d("MainActivity", "User email saved: $email, old prefix cleared")
+                            }
+
+                            // Enable UI after successful sign-in (on main thread)
+                            withContext(Dispatchers.Main) {
+                                enableUI()
+                                updateStatusWithAccount()
+                            }
+
+                            Toast.makeText(
+                                this@MainActivity,
+                                "Signed in as ${account.email}",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        } catch (e: Exception) {
+                            android.util.Log.e("MainActivity", "Failed to authenticate with Cognito", e)
+                            Toast.makeText(
+                                this@MainActivity,
+                                "Authentication failed: ${e.message}",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
+                } else {
+                    android.util.Log.e("MainActivity", "ID token is null")
+                    Toast.makeText(
+                        this,
+                        "Failed to get authentication token",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             } catch (e: ApiException) {
                 android.util.Log.e("MainActivity", "Google Sign-In ApiException - Status Code: ${e.statusCode}", e)
                 val errorMessage = when (e.statusCode) {
@@ -213,7 +254,17 @@ class MainActivity : AppCompatActivity() {
         setupListeners()
         requestPermissionsIfNeeded()
         promptForGoogleSignInIfNeeded()
-        promptForAccountIfNeeded()
+        updateStatusWithAccount()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Re-check sign-in status when returning from other activities (e.g., Settings after logout)
+        if (!GoogleSignInHelper.isSignedIn(this)) {
+            // User signed out, disable UI and show login dialog
+            disableUI()
+            promptForGoogleSignInIfNeeded()
+        }
     }
 
     private fun promptForGoogleSignInIfNeeded() {
@@ -221,18 +272,70 @@ class MainActivity : AppCompatActivity() {
             // Disable all UI until signed in
             disableUI()
 
-            // Show mandatory Google Sign-In dialog
-            androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle("Sign in Required")
-                .setMessage("You must sign in with Google to use this app.")
-                .setPositiveButton("Sign In") { _, _ ->
-                    startGoogleSignIn()
-                }
-                .setCancelable(false)
-                .show()
+            // Show mandatory Google Sign-In dialog (only if not already showing)
+            if (!isSignInDialogShowing) {
+                isSignInDialogShowing = true
+                androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("Sign in Required")
+                    .setMessage("You must sign in with Google to use this app.")
+                    .setPositiveButton("Sign In") { _, _ ->
+                        isSignInDialogShowing = false
+                        startGoogleSignIn()
+                    }
+                    .setOnDismissListener {
+                        isSignInDialogShowing = false
+                    }
+                    .setCancelable(false)
+                    .show()
+            }
         } else {
-            // User is signed in, enable UI
+            // User is signed in, restore Cognito session if needed
+            restoreCognitoSession()
+            // Enable UI
             enableUI()
+        }
+    }
+
+    private fun restoreCognitoSession() {
+        // Check if we have a saved Cognito identity
+        val savedIdentityId = AccountHelper.getCognitoIdentityId(this)
+        if (savedIdentityId != null) {
+            android.util.Log.d("MainActivity", "Restoring Cognito session with identity: $savedIdentityId")
+
+            // Get Google account to refresh ID token
+            val googleAccount = GoogleSignInHelper.getSignedInAccount(this)
+            android.util.Log.d("MainActivity", "Google account found: ${googleAccount?.email}")
+
+            val idToken = googleAccount?.idToken
+            android.util.Log.d("MainActivity", "ID token for restoration: ${if (idToken != null) "Yes (${idToken.length} chars)" else "No"}")
+
+            if (idToken != null) {
+                lifecycleScope.launch {
+                    try {
+                        val identityPoolId = getString(R.string.aws_identity_pool_id)
+                        val regionStr = getString(R.string.aws_region)
+                        val region = Regions.fromName(regionStr)
+
+                        // Re-authenticate with Cognito
+                        withContext(Dispatchers.IO) {
+                            CognitoAuthManager.authenticateWithGoogle(
+                                this@MainActivity,
+                                idToken,
+                                identityPoolId,
+                                region
+                            )
+                        }
+
+                        android.util.Log.d("MainActivity", "Cognito session restored successfully")
+                    } catch (e: Exception) {
+                        android.util.Log.e("MainActivity", "Failed to restore Cognito session", e)
+                    }
+                }
+            } else {
+                android.util.Log.w("MainActivity", "Cannot restore Cognito session: No ID token available")
+            }
+        } else {
+            android.util.Log.d("MainActivity", "No saved Cognito identity to restore")
         }
     }
 
@@ -249,11 +352,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun enableUI() {
+        android.util.Log.d("MainActivity", "enableUI() called")
         binding.modeToggleGroup.isEnabled = true
         binding.manualModeButton.isEnabled = true
         binding.dateRangeModeButton.isEnabled = true
+        android.util.Log.d("MainActivity", "Mode buttons enabled, calling updateUIForMode()")
         // Other buttons will be enabled based on selection state
         updateUIForMode()
+        android.util.Log.d("MainActivity", "enableUI() completed - selectPhotoButton.isEnabled = ${binding.selectPhotoButton.isEnabled}, startDateButton.isEnabled = ${binding.startDateButton.isEnabled}")
     }
 
     private fun startGoogleSignIn() {
@@ -279,33 +385,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun promptForAccountIfNeeded() {
-        val savedEmail = AccountHelper.getUserEmail(this)
-        if (savedEmail == null) {
-            // First time - show account picker
-            showAccountPicker()
-        } else {
-            binding.statusTextView.text = "Uploading to: $savedEmail"
+    private fun updateStatusWithAccount() {
+        val googleAccount = GoogleSignInHelper.getSignedInAccount(this)
+        if (googleAccount != null) {
+            binding.statusTextView.text = "Uploading to: ${googleAccount.email}"
         }
     }
 
-    private fun showAccountPicker() {
-        try {
-            val intent = android.accounts.AccountManager.newChooseAccountIntent(
-                null, // selectedAccount
-                null, // allowableAccounts
-                arrayOf("com.google"), // allowableAccountTypes - Google accounts only
-                null, // descriptionOverrideText
-                null, // addAccountAuthTokenType
-                null, // addAccountRequiredFeatures
-                null  // addAccountOptions
-            )
-            accountPickerLauncher.launch(intent)
-        } catch (e: Exception) {
-            Toast.makeText(this, "Failed to open account picker: ${e.message}", Toast.LENGTH_SHORT).show()
-            android.util.Log.e("MainActivity", "Failed to open account picker", e)
-        }
-    }
 
     override fun onCreateOptionsMenu(menu: android.view.Menu?): Boolean {
         menuInflater.inflate(R.menu.main_menu, menu)
@@ -390,7 +476,10 @@ class MainActivity : AppCompatActivity() {
         if (isDateRangeMode) {
             // Date range mode
             binding.selectPhotoButton.visibility = View.GONE
+            binding.selectPhotoButton.isEnabled = false
             binding.datePickerSection.visibility = View.VISIBLE
+            binding.startDateButton.isEnabled = true
+            binding.endDateButton.isEnabled = true
             binding.imagePreview.visibility = View.VISIBLE
             binding.imagePreview.setImageResource(R.drawable.ic_image_placeholder)
             binding.imagePreview.scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
@@ -414,7 +503,10 @@ class MainActivity : AppCompatActivity() {
             dateRangePhotos.clear()
 
             binding.selectPhotoButton.visibility = View.VISIBLE
+            binding.selectPhotoButton.isEnabled = true
             binding.datePickerSection.visibility = View.GONE
+            binding.startDateButton.isEnabled = false
+            binding.endDateButton.isEnabled = false
             binding.imagePreview.visibility = View.VISIBLE
 
             binding.uploadButton.isEnabled = selectedImageUris.isNotEmpty()
@@ -649,6 +741,49 @@ class MainActivity : AppCompatActivity() {
             val authority = uri.authority
             val uriString = uri.toString()
 
+            // Check if this is a Photo Picker URI (Android 13+)
+            // Pattern: content://media/picker_get_content/0/com.android.providers.media.photopicker/media/1000128525
+            if (uriString.contains("/picker_get_content/") || authority == "com.android.providers.media.photopicker") {
+                android.util.Log.d("MainActivity", "Detected Photo Picker URI, extracting media ID")
+
+                // Extract the media ID from the end of the URI
+                val segments = uri.pathSegments
+                if (segments.size >= 2) {
+                    val mediaId = segments.last()
+                    android.util.Log.d("MainActivity", "Extracted media ID: $mediaId")
+
+                    // Determine if this is an image or video by querying both
+                    // Try images first
+                    val imageUri = Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, mediaId)
+                    try {
+                        contentResolver.query(imageUri, arrayOf(MediaStore.Images.Media._ID), null, null, null)?.use { cursor ->
+                            if (cursor.count > 0) {
+                                android.util.Log.d("MainActivity", "Converted to image MediaStore URI: $imageUri")
+                                return imageUri
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("MainActivity", "Not an image URI")
+                    }
+
+                    // Try videos
+                    val videoUri = Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, mediaId)
+                    try {
+                        contentResolver.query(videoUri, arrayOf(MediaStore.Video.Media._ID), null, null, null)?.use { cursor ->
+                            if (cursor.count > 0) {
+                                android.util.Log.d("MainActivity", "Converted to video MediaStore URI: $videoUri")
+                                return videoUri
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("MainActivity", "Not a video URI")
+                    }
+
+                    android.util.Log.w("MainActivity", "Could not find media with ID: $mediaId")
+                    return null
+                }
+            }
+
             // Check if this is a Google Photos content provider URI
             if (authority == "com.google.android.apps.photos.contentprovider") {
                 android.util.Log.d("MainActivity", "Detected Google Photos URI, extracting MediaStore URI")
@@ -667,8 +802,8 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            // If it's already a MediaStore URI, return it as-is
-            if (authority == "media" || authority?.startsWith("com.android.providers.media") == true) {
+            // If it's already a MediaStore URI (direct access), return it as-is
+            if (authority == "media") {
                 return uri
             }
 
