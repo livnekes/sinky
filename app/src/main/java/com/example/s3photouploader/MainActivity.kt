@@ -302,21 +302,21 @@ class MainActivity : AppCompatActivity() {
         if (savedIdentityId != null) {
             android.util.Log.d("MainActivity", "Restoring Cognito session with identity: $savedIdentityId")
 
-            // Get Google account to refresh ID token
-            val googleAccount = GoogleSignInHelper.getSignedInAccount(this)
-            android.util.Log.d("MainActivity", "Google account found: ${googleAccount?.email}")
+            lifecycleScope.launch {
+                try {
+                    // Silently refresh Google Sign-In to get a fresh ID token
+                    android.util.Log.d("MainActivity", "Refreshing Google ID token...")
+                    val account = GoogleSignInHelper.silentlyRefreshIdToken(this@MainActivity)
 
-            val idToken = googleAccount?.idToken
-            android.util.Log.d("MainActivity", "ID token for restoration: ${if (idToken != null) "Yes (${idToken.length} chars)" else "No"}")
+                    if (account != null && account.idToken != null) {
+                        val idToken = account.idToken!!
+                        android.util.Log.d("MainActivity", "Got fresh ID token (${idToken.length} chars)")
 
-            if (idToken != null) {
-                lifecycleScope.launch {
-                    try {
                         val identityPoolId = getString(R.string.aws_identity_pool_id)
                         val regionStr = getString(R.string.aws_region)
                         val region = Regions.fromName(regionStr)
 
-                        // Re-authenticate with Cognito
+                        // Re-authenticate with Cognito using fresh token
                         withContext(Dispatchers.IO) {
                             CognitoAuthManager.authenticateWithGoogle(
                                 this@MainActivity,
@@ -326,13 +326,13 @@ class MainActivity : AppCompatActivity() {
                             )
                         }
 
-                        android.util.Log.d("MainActivity", "Cognito session restored successfully")
-                    } catch (e: Exception) {
-                        android.util.Log.e("MainActivity", "Failed to restore Cognito session", e)
+                        android.util.Log.d("MainActivity", "Cognito session restored successfully with fresh token")
+                    } else {
+                        android.util.Log.w("MainActivity", "Failed to refresh ID token silently - sign-in may be required")
                     }
+                } catch (e: Exception) {
+                    android.util.Log.e("MainActivity", "Failed to restore Cognito session", e)
                 }
-            } else {
-                android.util.Log.w("MainActivity", "Cannot restore Cognito session: No ID token available")
             }
         } else {
             android.util.Log.d("MainActivity", "No saved Cognito identity to restore")

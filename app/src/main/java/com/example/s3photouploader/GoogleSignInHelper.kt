@@ -85,4 +85,25 @@ object GoogleSignInHelper {
             onComplete()
         }
     }
+
+    /**
+     * Silently refresh the Google ID token
+     * This is used to get a fresh ID token when the cached one expires
+     * Returns the fresh account with a new ID token, or null if failed
+     */
+    suspend fun silentlyRefreshIdToken(context: Context): GoogleSignInAccount? {
+        return kotlinx.coroutines.suspendCancellableCoroutine { continuation ->
+            val client = getGoogleSignInClient(context)
+
+            client.silentSignIn()
+                .addOnSuccessListener { account ->
+                    android.util.Log.d("GoogleSignInHelper", "Silent sign-in successful, got fresh ID token")
+                    continuation.resume(account) { }
+                }
+                .addOnFailureListener { e ->
+                    android.util.Log.e("GoogleSignInHelper", "Silent sign-in failed", e)
+                    continuation.resume(null) { }
+                }
+        }
+    }
 }

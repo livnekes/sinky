@@ -11,8 +11,8 @@
     <string name="aws_region">eu-central-1</string>
     <string name="aws_identity_pool_id">eu-central-1:f650f40e-1064-4145-a0b3-8f98dbdd7be2</string>
 
-    <!-- Lambda API Configuration -->
-    <string name="lambda_stats_endpoint">https://ds46wubfahfyujbby2oegvamfm0flqqm.lambda-url.eu-central-1.on.aws/</string>
+    <!-- API Gateway Configuration -->
+    <string name="lambda_stats_endpoint">https://c4qss7327b.execute-api.eu-central-1.amazonaws.com/prod/stats</string>
 
     <!-- Google OAuth Configuration -->
     <string name="google_web_client_id">472028261324-blj3024ll1lkmgjsu6cvrif0gopnsio7.apps.googleusercontent.com</string>

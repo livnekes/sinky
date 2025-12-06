@@ -249,6 +249,31 @@ class SettingsActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             try {
+                // Refresh Google ID token before making API call
+                android.util.Log.d("SettingsActivity", "Refreshing Google ID token...")
+                val account = GoogleSignInHelper.silentlyRefreshIdToken(this@SettingsActivity)
+
+                if (account != null && account.idToken != null) {
+                    val idToken = account.idToken!!
+                    android.util.Log.d("SettingsActivity", "Got fresh ID token, re-authenticating with Cognito...")
+
+                    // Re-authenticate with Cognito using fresh token
+                    val identityPoolId = getString(R.string.aws_identity_pool_id)
+                    val regionStr = getString(R.string.aws_region)
+                    val region = com.amazonaws.regions.Regions.fromName(regionStr)
+
+                    withContext(Dispatchers.IO) {
+                        CognitoAuthManager.authenticateWithGoogle(
+                            this@SettingsActivity,
+                            idToken,
+                            identityPoolId,
+                            region
+                        )
+                    }
+
+                    android.util.Log.d("SettingsActivity", "Cognito authentication successful")
+                }
+
                 val securePrefix = AccountHelper.getSecureUploadPrefix(this@SettingsActivity)
                 if (securePrefix == null) {
                     binding.cloudPhotoCountText.text = "Account not set"
@@ -330,12 +355,18 @@ class SettingsActivity : AppCompatActivity() {
 
         // Execute request
         httpClient.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string() ?: ""
+
+            android.util.Log.d("SettingsActivity", "Response code: ${response.code}")
+            android.util.Log.d("SettingsActivity", "Response body: $responseBody")
+
             if (!response.isSuccessful) {
-                throw Exception("Lambda returned error: ${response.code} ${response.message}")
+                throw Exception("Lambda returned error: ${response.code} ${response.message}\nBody: $responseBody")
             }
 
-            val responseBody = response.body?.string()
-                ?: throw Exception("Empty response from Lambda")
+            if (responseBody.isEmpty()) {
+                throw Exception("Empty response from Lambda")
+            }
 
             android.util.Log.d("SettingsActivity", "Lambda response: $responseBody")
 
