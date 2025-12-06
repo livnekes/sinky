@@ -20,50 +20,13 @@ function extractCognitoIdFromPrefix(prefix) {
     return null;
 }
 
-/**
- * Extract Cognito Identity ID from AWS security token
- * The token contains session information including the identity ID
- */
-function extractCognitoIdFromToken(securityToken) {
-    try {
-        // Decode the token (it's base64-like but URL encoded)
-        const decodedToken = decodeURIComponent(securityToken);
-
-        // Look for the Cognito Identity ID pattern: region:uuid format
-        // Pattern: eu-central-1:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-        const cognitoIdMatch = decodedToken.match(/([a-z]{2}-[a-z]+-\d+:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i);
-
-        if (cognitoIdMatch) {
-            return cognitoIdMatch[1];
-        }
-
-        console.log("Could not extract Cognito ID from token");
-        return null;
-    } catch (e) {
-        console.error("Error extracting Cognito ID from token:", e);
-        return null;
-    }
-}
 
 export const handler = async (event) => {
     try {
         console.log("Received event:", JSON.stringify(event, null, 2));
 
-        // Detect if request is from API Gateway or Lambda Function URL
-        const isApiGateway = event.requestContext?.identity !== undefined;
-        console.log(`Request source: ${isApiGateway ? 'API Gateway' : 'Lambda Function URL'}`);
-
-        // Verify IAM authentication
-        // For API Gateway with AWS_IAM: info is in requestContext.identity
-        // For Lambda Authorizer: info is in requestContext.authorizer.iam
-        let userArn;
-        if (isApiGateway) {
-            userArn = event.requestContext?.identity?.userArn;
-        } else {
-            // Lambda Function URL
-            const iamAuth = event.requestContext?.authorizer?.iam;
-            userArn = iamAuth?.userArn;
-        }
+        // Verify IAM authentication from API Gateway
+        const userArn = event.requestContext?.identity?.userArn;
 
         if (!userArn) {
             console.error("No IAM authorization context found");
@@ -97,19 +60,9 @@ export const handler = async (event) => {
             };
         }
 
-        // Extract Cognito Identity ID based on source
-        let requestCognitoIdentityId;
-
-        if (isApiGateway) {
-            // API Gateway: Cognito ID is directly available
-            requestCognitoIdentityId = event.requestContext.identity.cognitoIdentityId;
-            console.log(`✓ API Gateway - Cognito Identity ID: ${requestCognitoIdentityId}`);
-        } else {
-            // Lambda Function URL: Extract from security token
-            const securityToken = event.headers['x-amz-security-token'];
-            requestCognitoIdentityId = extractCognitoIdFromToken(securityToken);
-            console.log(`✓ Lambda URL - Cognito Identity ID from token: ${requestCognitoIdentityId}`);
-        }
+        // Extract Cognito Identity ID from API Gateway
+        const requestCognitoIdentityId = event.requestContext.identity.cognitoIdentityId;
+        console.log(`✓ Cognito Identity ID: ${requestCognitoIdentityId}`);
 
         // Parse request body
         let body;
