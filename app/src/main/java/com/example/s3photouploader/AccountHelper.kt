@@ -13,6 +13,7 @@ object AccountHelper {
     private const val KEY_USER_EMAIL = "user_email"
     private const val KEY_USER_GUID = "user_guid"
     private const val KEY_S3_PREFIX = "s3_prefix"
+    private const val KEY_COGNITO_IDENTITY_ID = "cognito_identity_id"
 
     /**
      * Gets the stored user email
@@ -103,7 +104,30 @@ object AccountHelper {
     }
 
     /**
-     * Clears all user data (email, GUID, S3 prefix)
+     * Saves the Cognito identity ID
+     *
+     * @param context Application context
+     * @param identityId The Cognito identity ID
+     */
+    fun saveCognitoIdentityId(context: Context, identityId: String) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_COGNITO_IDENTITY_ID, identityId).apply()
+        android.util.Log.d("AccountHelper", "Saved Cognito identity ID: $identityId")
+    }
+
+    /**
+     * Gets the Cognito identity ID
+     *
+     * @param context Application context
+     * @return Cognito identity ID, or null if not set
+     */
+    fun getCognitoIdentityId(context: Context): String? {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_COGNITO_IDENTITY_ID, null)
+    }
+
+    /**
+     * Clears all user data (email, GUID, S3 prefix, Cognito identity)
      */
     fun clearUserData(context: Context) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

@@ -83,13 +83,17 @@ class CognitoS3Uploader {
         var uploadObserver: com.amazonaws.mobileconnectors.s3.transferutility.TransferObserver? = null
 
         try {
-            // Create Cognito credentials provider
-            // This provides temporary AWS credentials without exposing permanent keys
-            val credentialsProvider = CognitoCachingCredentialsProvider(
-                context,
-                identityPoolId,
-                region
-            )
+            // Get authenticated credentials provider from CognitoAuthManager
+            // If user is authenticated with Google, this will use their Cognito identity
+            val credentialsProvider = CognitoAuthManager.getCredentialsProvider()
+                ?: run {
+                    // Fallback: Create unauthenticated provider if not signed in
+                    android.util.Log.w("CognitoS3Uploader", "No authenticated credentials, using unauthenticated access")
+                    CognitoAuthManager.createUnauthenticatedProvider(context, identityPoolId, region)
+                }
+
+            // Refresh credentials before uploading
+            CognitoAuthManager.refreshCredentialsIfNeeded()
 
             // Create S3 client with Cognito credentials
             val s3Client = AmazonS3Client(credentialsProvider, Region.getRegion(region))

@@ -43,6 +43,7 @@ class MainActivity : AppCompatActivity() {
     private val failedImageUris = mutableListOf<Uri>()
     private lateinit var s3Uploader: CognitoS3Uploader
     private var uploadJob: Job? = null
+    private var isSignInDialogShowing = false
 
     // Date range for backup mode
     private var startDateMillis: Long? = null
@@ -158,22 +159,63 @@ class MainActivity : AppCompatActivity() {
                 val account = task.getResult(ApiException::class.java)
                 android.util.Log.d("MainActivity", "Google Sign-In successful: ${account.email}")
 
-                // Save email and set S3 prefix to email
-                account.email?.let { email ->
-                    AccountHelper.saveUserEmail(this, email)
-                    // Use email directly as S3 prefix
-                    AccountHelper.saveS3Prefix(this, email)
-                    android.util.Log.d("MainActivity", "S3 prefix set to: $email")
+                // Get Google ID token
+                val idToken = account.idToken
+                android.util.Log.d("MainActivity", "ID token retrieved: ${if (idToken != null) "Yes (${idToken.length} chars)" else "No"}")
+
+                if (idToken != null) {
+                    // Authenticate with Cognito using Google ID token
+                    lifecycleScope.launch {
+                        try {
+                            val identityPoolId = getString(R.string.aws_identity_pool_id)
+                            val regionStr = getString(R.string.aws_region)
+                            val region = Regions.fromName(regionStr)
+
+                            // Exchange Google token for Cognito credentials
+                            withContext(Dispatchers.IO) {
+                                CognitoAuthManager.authenticateWithGoogle(
+                                    this@MainActivity,
+                                    idToken,
+                                    identityPoolId,
+                                    region
+                                )
+                            }
+
+                            android.util.Log.d("MainActivity", "Successfully authenticated with Cognito")
+
+                            // Save email and set S3 prefix to email
+                            account.email?.let { email ->
+                                AccountHelper.saveUserEmail(this@MainActivity, email)
+                                // Use email directly as S3 prefix
+                                AccountHelper.saveS3Prefix(this@MainActivity, email)
+                                android.util.Log.d("MainActivity", "S3 prefix set to: $email")
+                            }
+
+                            // Enable UI after successful sign-in
+                            enableUI()
+
+                            Toast.makeText(
+                                this@MainActivity,
+                                "Signed in as ${account.email}",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        } catch (e: Exception) {
+                            android.util.Log.e("MainActivity", "Failed to authenticate with Cognito", e)
+                            Toast.makeText(
+                                this@MainActivity,
+                                "Authentication failed: ${e.message}",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
+                } else {
+                    android.util.Log.e("MainActivity", "ID token is null")
+                    Toast.makeText(
+                        this,
+                        "Failed to get authentication token",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
-
-                // Enable UI after successful sign-in
-                enableUI()
-
-                Toast.makeText(
-                    this,
-                    "Signed in as ${account.email}",
-                    Toast.LENGTH_LONG
-                ).show()
             } catch (e: ApiException) {
                 android.util.Log.e("MainActivity", "Google Sign-In ApiException - Status Code: ${e.statusCode}", e)
                 val errorMessage = when (e.statusCode) {
@@ -212,23 +254,85 @@ class MainActivity : AppCompatActivity() {
         updateStatusWithAccount()
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Re-check sign-in status when returning from other activities (e.g., Settings after logout)
+        if (!GoogleSignInHelper.isSignedIn(this)) {
+            // User signed out, disable UI and show login dialog
+            disableUI()
+            promptForGoogleSignInIfNeeded()
+        }
+    }
+
     private fun promptForGoogleSignInIfNeeded() {
         if (!GoogleSignInHelper.isSignedIn(this)) {
             // Disable all UI until signed in
             disableUI()
 
-            // Show mandatory Google Sign-In dialog
-            androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle("Sign in Required")
-                .setMessage("You must sign in with Google to use this app.")
-                .setPositiveButton("Sign In") { _, _ ->
-                    startGoogleSignIn()
-                }
-                .setCancelable(false)
-                .show()
+            // Show mandatory Google Sign-In dialog (only if not already showing)
+            if (!isSignInDialogShowing) {
+                isSignInDialogShowing = true
+                androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("Sign in Required")
+                    .setMessage("You must sign in with Google to use this app.")
+                    .setPositiveButton("Sign In") { _, _ ->
+                        isSignInDialogShowing = false
+                        startGoogleSignIn()
+                    }
+                    .setOnDismissListener {
+                        isSignInDialogShowing = false
+                    }
+                    .setCancelable(false)
+                    .show()
+            }
         } else {
-            // User is signed in, enable UI
+            // User is signed in, restore Cognito session if needed
+            restoreCognitoSession()
+            // Enable UI
             enableUI()
+        }
+    }
+
+    private fun restoreCognitoSession() {
+        // Check if we have a saved Cognito identity
+        val savedIdentityId = AccountHelper.getCognitoIdentityId(this)
+        if (savedIdentityId != null) {
+            android.util.Log.d("MainActivity", "Restoring Cognito session with identity: $savedIdentityId")
+
+            // Get Google account to refresh ID token
+            val googleAccount = GoogleSignInHelper.getSignedInAccount(this)
+            android.util.Log.d("MainActivity", "Google account found: ${googleAccount?.email}")
+
+            val idToken = googleAccount?.idToken
+            android.util.Log.d("MainActivity", "ID token for restoration: ${if (idToken != null) "Yes (${idToken.length} chars)" else "No"}")
+
+            if (idToken != null) {
+                lifecycleScope.launch {
+                    try {
+                        val identityPoolId = getString(R.string.aws_identity_pool_id)
+                        val regionStr = getString(R.string.aws_region)
+                        val region = Regions.fromName(regionStr)
+
+                        // Re-authenticate with Cognito
+                        withContext(Dispatchers.IO) {
+                            CognitoAuthManager.authenticateWithGoogle(
+                                this@MainActivity,
+                                idToken,
+                                identityPoolId,
+                                region
+                            )
+                        }
+
+                        android.util.Log.d("MainActivity", "Cognito session restored successfully")
+                    } catch (e: Exception) {
+                        android.util.Log.e("MainActivity", "Failed to restore Cognito session", e)
+                    }
+                }
+            } else {
+                android.util.Log.w("MainActivity", "Cannot restore Cognito session: No ID token available")
+            }
+        } else {
+            android.util.Log.d("MainActivity", "No saved Cognito identity to restore")
         }
     }
 

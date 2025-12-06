@@ -11,20 +11,25 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import com.amazonaws.auth.CognitoCachingCredentialsProvider
-import com.amazonaws.regions.Region
-import com.amazonaws.regions.Regions
-import com.amazonaws.services.s3.AmazonS3Client
-import com.amazonaws.services.s3.model.ListObjectsV2Request
 import com.example.s3photouploader.databinding.ActivitySettingsBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.text.DecimalFormat
+import java.util.concurrent.TimeUnit
 
 class SettingsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySettingsBinding
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .build()
 
     // Permission launcher for reading media
     private val permissionLauncher = registerForActivityResult(
@@ -92,6 +97,9 @@ class SettingsActivity : AppCompatActivity() {
             .setMessage("Are you sure you want to disconnect your Google account? You will need to sign in again to use the app.")
             .setPositiveButton("Disconnect") { _, _ ->
                 GoogleSignInHelper.signOut(this) {
+                    // Clear Cognito credentials
+                    CognitoAuthManager.signOut()
+
                     // Clear saved data
                     AccountHelper.clearUserData(this)
 
@@ -249,14 +257,10 @@ class SettingsActivity : AppCompatActivity() {
                     return@launch
                 }
 
-                // Get AWS config from strings.xml
-                val bucketName = getString(R.string.aws_bucket_name)
-                val regionStr = getString(R.string.aws_region)
-                val identityPoolId = getString(R.string.aws_identity_pool_id)
-                val region = Regions.fromName(regionStr)
+                val lambdaEndpoint = getString(R.string.lambda_stats_endpoint)
 
                 val stats = withContext(Dispatchers.IO) {
-                    fetchCloudStatsFromS3(bucketName, region, identityPoolId, securePrefix)
+                    fetchCloudStatsFromLambda(lambdaEndpoint, securePrefix)
                 }
 
                 binding.cloudPhotoCountText.text = "${stats.objectCount} items"
@@ -278,53 +282,51 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     /**
-     * Fetches cloud storage statistics directly from S3
-     * Lists all objects with the user's prefix and calculates count and total size
+     * Calls Lambda function to get cloud storage statistics
+     *
+     * Expected Lambda request:
+     * POST /stats
+     * Content-Type: application/json
+     * Body: {"prefix": "email_guid"}
+     *
+     * Expected Lambda response:
+     * {
+     *   "objectCount": 123,
+     *   "totalSize": 1234567890
+     * }
      */
-    private fun fetchCloudStatsFromS3(
-        bucketName: String,
-        region: Regions,
-        identityPoolId: String,
-        prefix: String
-    ): CloudStorageStats {
-        android.util.Log.d("SettingsActivity", "Fetching cloud stats from S3 with prefix: $prefix")
+    private fun fetchCloudStatsFromLambda(endpoint: String, prefix: String): CloudStorageStats {
+        // Create JSON request body
+        val requestBody = JSONObject().apply {
+            put("prefix", prefix)
+        }.toString()
 
-        // Create Cognito credentials provider
-        val credentialsProvider = CognitoCachingCredentialsProvider(
-            this,
-            identityPoolId,
-            region
-        )
+        android.util.Log.d("SettingsActivity", "Calling Lambda endpoint: $endpoint with prefix: $prefix")
 
-        // Create S3 client
-        val s3Client = AmazonS3Client(credentialsProvider, Region.getRegion(region))
+        // Create HTTP request
+        val request = Request.Builder()
+            .url(endpoint)
+            .post(requestBody.toRequestBody("application/json".toMediaType()))
+            .build()
 
-        var objectCount = 0
-        var totalSize = 0L
-        var continuationToken: String? = null
-
-        do {
-            // Create list request
-            val listRequest = ListObjectsV2Request()
-                .withBucketName(bucketName)
-                .withPrefix(prefix)
-                .withContinuationToken(continuationToken)
-
-            // Execute list request
-            val result = s3Client.listObjectsV2(listRequest)
-
-            // Count objects and sum sizes
-            result.objectSummaries?.forEach { obj ->
-                objectCount++
-                totalSize += obj.size
+        // Execute request
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw Exception("Lambda returned error: ${response.code} ${response.message}")
             }
 
-            continuationToken = result.nextContinuationToken
-        } while (continuationToken != null)
+            val responseBody = response.body?.string()
+                ?: throw Exception("Empty response from Lambda")
 
-        android.util.Log.d("SettingsActivity", "Found $objectCount objects, total size: $totalSize bytes")
+            android.util.Log.d("SettingsActivity", "Lambda response: $responseBody")
 
-        return CloudStorageStats(objectCount, totalSize)
+            // Parse JSON response
+            val json = JSONObject(responseBody)
+            val objectCount = json.getInt("objectCount")
+            val totalSize = json.getLong("totalSize")
+
+            return CloudStorageStats(objectCount, totalSize)
+        }
     }
 
     private fun formatBytes(bytes: Long): String {

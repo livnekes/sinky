@@ -9,7 +9,7 @@
     <!-- AWS Configuration -->
     <string name="aws_bucket_name">photos-sinky</string>
     <string name="aws_region">eu-central-1</string>
-    <string name="aws_identity_pool_id">eu-central-1:cc6a4034-1d2c-452f-91e6-479b7f98ad99</string>
+    <string name="aws_identity_pool_id">eu-central-1:f650f40e-1064-4145-a0b3-8f98dbdd7be2</string>
 
     <!-- Lambda API Configuration -->
     <string name="lambda_stats_endpoint">https://ds46wubfahfyujbby2oegvamfm0flqqm.lambda-url.eu-central-1.on.aws/</string>
