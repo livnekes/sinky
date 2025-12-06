@@ -741,6 +741,49 @@ class MainActivity : AppCompatActivity() {
             val authority = uri.authority
             val uriString = uri.toString()
 
+            // Check if this is a Photo Picker URI (Android 13+)
+            // Pattern: content://media/picker_get_content/0/com.android.providers.media.photopicker/media/1000128525
+            if (uriString.contains("/picker_get_content/") || authority == "com.android.providers.media.photopicker") {
+                android.util.Log.d("MainActivity", "Detected Photo Picker URI, extracting media ID")
+
+                // Extract the media ID from the end of the URI
+                val segments = uri.pathSegments
+                if (segments.size >= 2) {
+                    val mediaId = segments.last()
+                    android.util.Log.d("MainActivity", "Extracted media ID: $mediaId")
+
+                    // Determine if this is an image or video by querying both
+                    // Try images first
+                    val imageUri = Uri.withAppendedPath(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, mediaId)
+                    try {
+                        contentResolver.query(imageUri, arrayOf(MediaStore.Images.Media._ID), null, null, null)?.use { cursor ->
+                            if (cursor.count > 0) {
+                                android.util.Log.d("MainActivity", "Converted to image MediaStore URI: $imageUri")
+                                return imageUri
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("MainActivity", "Not an image URI")
+                    }
+
+                    // Try videos
+                    val videoUri = Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, mediaId)
+                    try {
+                        contentResolver.query(videoUri, arrayOf(MediaStore.Video.Media._ID), null, null, null)?.use { cursor ->
+                            if (cursor.count > 0) {
+                                android.util.Log.d("MainActivity", "Converted to video MediaStore URI: $videoUri")
+                                return videoUri
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("MainActivity", "Not a video URI")
+                    }
+
+                    android.util.Log.w("MainActivity", "Could not find media with ID: $mediaId")
+                    return null
+                }
+            }
+
             // Check if this is a Google Photos content provider URI
             if (authority == "com.google.android.apps.photos.contentprovider") {
                 android.util.Log.d("MainActivity", "Detected Google Photos URI, extracting MediaStore URI")
@@ -759,8 +802,8 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            // If it's already a MediaStore URI, return it as-is
-            if (authority == "media" || authority?.startsWith("com.android.providers.media") == true) {
+            // If it's already a MediaStore URI (direct access), return it as-is
+            if (authority == "media") {
                 return uri
             }
 
