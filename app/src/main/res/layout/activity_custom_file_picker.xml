@@ -15,7 +15,7 @@
             android:background="?attr/colorPrimary"
             app:title="Select Large Files (10MB+)"
             app:titleTextColor="@android:color/white"
-            app:navigationIcon="@android:drawable/ic_menu_close_clear_cancel" />
+            app:navigationIcon="@drawable/ic_close_bold" />
 
         <com.google.android.material.tabs.TabLayout
             android:id="@+id/tabLayout"

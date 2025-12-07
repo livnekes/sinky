@@ -31,8 +31,10 @@
             android:id="@+id/checkbox"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_gravity="top|end"
-            android:layout_margin="8dp"
+            android:layout_gravity="top|start"
+            android:layout_margin="2dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
             android:visibility="gone" />
 
         <TextView

@@ -3,8 +3,10 @@ package com.example.s3photouploader
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.text.Html
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -54,13 +56,17 @@ class CustomFilePickerActivity : AppCompatActivity() {
     }
 
     private fun setupRecyclerViews() {
-        photosAdapter = MediaFileAdapter(photoItems) {
-            updateSelectButton()
-        }
+        photosAdapter = MediaFileAdapter(
+            items = photoItems,
+            onSelectionChanged = { updateSelectButton() },
+            onPreviewClicked = { item -> showPreview(item) }
+        )
 
-        videosAdapter = MediaFileAdapter(videoItems) {
-            updateSelectButton()
-        }
+        videosAdapter = MediaFileAdapter(
+            items = videoItems,
+            onSelectionChanged = { updateSelectButton() },
+            onPreviewClicked = { item -> showPreview(item) }
+        )
 
         binding.photosRecyclerView.layoutManager = GridLayoutManager(this, 3)
         binding.photosRecyclerView.adapter = photosAdapter
@@ -133,7 +139,7 @@ class CustomFilePickerActivity : AppCompatActivity() {
                     binding.statusText.text = "No photos found larger than 10MB"
                     binding.tabLayout.visibility = View.GONE
                 } else {
-                    binding.statusText.text = "Tap to select files • ${photos.size} photos"
+                    binding.statusText.text = Html.fromHtml("<b>Tap to select • Long press for preview</b>", Html.FROM_HTML_MODE_LEGACY)
                     binding.tabLayout.visibility = View.VISIBLE
 
                     // Show photos tab
@@ -173,13 +179,13 @@ class CustomFilePickerActivity : AppCompatActivity() {
 
                 // Update tab text and status
                 binding.tabLayout.getTabAt(1)?.text = "Videos (${videos.size})"
-                binding.statusText.text = "Tap to select files • ${photoItems.size} photos, ${videos.size} videos"
+                binding.statusText.text = Html.fromHtml("<b>Tap to select • Long press for preview</b>", Html.FROM_HTML_MODE_LEGACY)
 
                 // Update Load More button visibility
                 binding.loadMoreVideosButton.visibility = if (hasMoreVideos) View.VISIBLE else View.GONE
 
                 if (videos.isEmpty()) {
-                    binding.statusText.text = "Tap to select files • ${photoItems.size} photos, 0 videos"
+                    binding.statusText.text = Html.fromHtml("<b>Tap to select • Long press for preview</b>", Html.FROM_HTML_MODE_LEGACY)
                 }
             } catch (e: Exception) {
                 android.util.Log.e("CustomFilePicker", "Error loading videos", e)
@@ -209,7 +215,7 @@ class CustomFilePickerActivity : AppCompatActivity() {
 
                 // Update tab count
                 binding.tabLayout.getTabAt(0)?.text = "Photos (${photoItems.size})"
-                binding.statusText.text = "Tap to select files • ${photoItems.size} photos, ${videoItems.size} videos"
+                binding.statusText.text = Html.fromHtml("<b>Tap to select • Long press for preview</b>", Html.FROM_HTML_MODE_LEGACY)
 
                 // Update button visibility
                 binding.loadMorePhotosButton.visibility = if (hasMorePhotos) View.VISIBLE else View.GONE
@@ -244,7 +250,7 @@ class CustomFilePickerActivity : AppCompatActivity() {
 
                 // Update tab count
                 binding.tabLayout.getTabAt(1)?.text = "Videos (${videoItems.size})"
-                binding.statusText.text = "Tap to select files • ${photoItems.size} photos, ${videoItems.size} videos"
+                binding.statusText.text = Html.fromHtml("<b>Tap to select • Long press for preview</b>", Html.FROM_HTML_MODE_LEGACY)
 
                 // Update button visibility
                 binding.loadMoreVideosButton.visibility = if (hasMoreVideos) View.VISIBLE else View.GONE
@@ -357,5 +363,98 @@ class CustomFilePickerActivity : AppCompatActivity() {
 
         setResult(Activity.RESULT_OK, resultIntent)
         finish()
+    }
+
+    private fun showPreview(item: MediaItem) {
+        val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setView(R.layout.dialog_media_preview)
+            .create()
+
+        dialog.show()
+
+        val previewImageView = dialog.findViewById<android.widget.ImageView>(R.id.previewImageView)
+        val previewVideoView = dialog.findViewById<android.widget.VideoView>(R.id.previewVideoView)
+        val previewFileSize = dialog.findViewById<android.widget.TextView>(R.id.previewFileSize)
+        val closeButton = dialog.findViewById<android.widget.Button>(R.id.closeButton)
+        val selectFromPreviewButton = dialog.findViewById<android.widget.Button>(R.id.selectFromPreviewButton)
+        val loadingIndicator = dialog.findViewById<android.widget.ProgressBar>(R.id.previewLoadingIndicator)
+
+        previewFileSize?.text = "File size: ${item.getFormattedSize()}"
+
+        if (item.isVideo) {
+            // Show video preview
+            previewVideoView?.visibility = View.VISIBLE
+            previewImageView?.visibility = View.GONE
+            loadingIndicator?.visibility = View.VISIBLE
+
+            previewVideoView?.setVideoURI(item.uri)
+            previewVideoView?.setOnPreparedListener { mediaPlayer ->
+                loadingIndicator?.visibility = View.GONE
+                mediaPlayer.isLooping = true
+                mediaPlayer.start()
+            }
+            previewVideoView?.setOnErrorListener { _, _, _ ->
+                loadingIndicator?.visibility = View.GONE
+                android.util.Log.e("CustomFilePicker", "Error loading video preview")
+                true
+            }
+        } else {
+            // Show image preview
+            previewImageView?.visibility = View.VISIBLE
+            previewVideoView?.visibility = View.GONE
+            loadingIndicator?.visibility = View.VISIBLE
+
+            lifecycleScope.launch {
+                try {
+                    withContext(Dispatchers.IO) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            val bitmap = contentResolver.loadThumbnail(
+                                item.uri,
+                                android.util.Size(2048, 2048),
+                                null
+                            )
+                            withContext(Dispatchers.Main) {
+                                previewImageView?.setImageBitmap(bitmap)
+                                loadingIndicator?.visibility = View.GONE
+                            }
+                        } else {
+                            withContext(Dispatchers.Main) {
+                                previewImageView?.setImageURI(item.uri)
+                                loadingIndicator?.visibility = View.GONE
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("CustomFilePicker", "Error loading image preview", e)
+                    withContext(Dispatchers.Main) {
+                        loadingIndicator?.visibility = View.GONE
+                    }
+                }
+            }
+        }
+
+        closeButton?.setOnClickListener {
+            previewVideoView?.stopPlayback()
+            dialog.dismiss()
+        }
+
+        selectFromPreviewButton?.setOnClickListener {
+            item.isSelected = !item.isSelected
+            if (item.isVideo) {
+                videosAdapter.notifyDataSetChanged()
+            } else {
+                photosAdapter.notifyDataSetChanged()
+            }
+            updateSelectButton()
+
+            selectFromPreviewButton.text = if (item.isSelected) "Deselect" else "Select"
+        }
+
+        // Update select button text based on current selection state
+        selectFromPreviewButton?.text = if (item.isSelected) "Deselect" else "Select"
+
+        dialog.setOnDismissListener {
+            previewVideoView?.stopPlayback()
+        }
     }
 }

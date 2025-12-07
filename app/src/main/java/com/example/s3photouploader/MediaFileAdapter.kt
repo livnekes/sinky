@@ -16,7 +16,8 @@ import com.google.android.material.card.MaterialCardView
 
 class MediaFileAdapter(
     private val items: List<MediaItem>,
-    private val onSelectionChanged: () -> Unit
+    private val onSelectionChanged: () -> Unit,
+    private val onPreviewClicked: (MediaItem) -> Unit
 ) : RecyclerView.Adapter<MediaFileAdapter.MediaViewHolder>() {
 
     class MediaViewHolder(view: View) : RecyclerView.ViewHolder(view) {
@@ -84,11 +85,17 @@ class MediaFileAdapter(
         holder.selectionOverlay.visibility = if (item.isSelected) View.VISIBLE else View.GONE
         holder.checkbox.isChecked = item.isSelected
 
-        // Handle click
+        // Handle selection click
         holder.cardView.setOnClickListener {
             item.isSelected = !item.isSelected
             notifyItemChanged(position)
             onSelectionChanged()
+        }
+
+        // Handle long press for preview
+        holder.cardView.setOnLongClickListener {
+            onPreviewClicked(item)
+            true
         }
     }
 
