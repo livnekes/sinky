@@ -1,0 +1,85 @@
+[versions]
+# Android Gradle Plugin (compatible with Gradle 8.2)
+androidGradlePlugin = "8.1.0"
+kotlin = "1.9.0"
+
+# AndroidX (compatible with compileSdk 34)
+androidxCore = "1.12.0"
+androidxAppCompat = "1.6.1"
+androidxActivity = "1.8.0"
+androidxConstraintLayout = "2.1.4"
+androidxLifecycle = "2.6.2"
+androidxExifInterface = "1.3.6"
+
+# Material Design
+material = "1.10.0"
+
+# AWS SDK
+awsSdk = "2.73.0"
+
+# Coroutines
+kotlinxCoroutines = "1.7.3"
+
+# OkHttp
+okhttp = "4.12.0"
+
+# Google Services
+googleAuth = "20.7.0"
+googleApiClient = "1.32.1"
+googleApiDrive = "v3-rev136-1.25.0"
+googleHttpClient = "1.42.0"
+
+# Testing
+junit4 = "4.13.2"
+androidxTestExt = "1.1.5"
+androidxEspresso = "3.5.1"
+
+[libraries]
+# AndroidX Core
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "androidxCore" }
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "androidxAppCompat" }
+androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "androidxActivity" }
+androidx-constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "androidxConstraintLayout" }
+androidx-exifinterface = { group = "androidx.exifinterface", name = "exifinterface", version.ref = "androidxExifInterface" }
+
+# Lifecycle
+androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "androidxLifecycle" }
+androidx-lifecycle-viewmodel-ktx = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-ktx", version.ref = "androidxLifecycle" }
+
+# Material Design
+material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+
+# AWS SDK
+aws-android-sdk-s3 = { group = "com.amazonaws", name = "aws-android-sdk-s3", version.ref = "awsSdk" }
+aws-android-sdk-core = { group = "com.amazonaws", name = "aws-android-sdk-core", version.ref = "awsSdk" }
+aws-android-sdk-cognitoidentityprovider = { group = "com.amazonaws", name = "aws-android-sdk-cognitoidentityprovider", version.ref = "awsSdk" }
+
+# Coroutines
+kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
+
+# OkHttp
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+
+# Google Services
+google-auth = { group = "com.google.android.gms", name = "play-services-auth", version.ref = "googleAuth" }
+google-api-client-android = { group = "com.google.api-client", name = "google-api-client-android", version.ref = "googleApiClient" }
+google-api-services-drive = { group = "com.google.apis", name = "google-api-services-drive", version.ref = "googleApiDrive" }
+google-http-client-gson = { group = "com.google.http-client", name = "google-http-client-gson", version.ref = "googleHttpClient" }
+
+# Testing
+junit = { group = "junit", name = "junit", version.ref = "junit4" }
+androidx-test-ext = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestExt" }
+androidx-test-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "androidxEspresso" }
+
+# Dependencies for build-logic
+android-gradlePlugin = { group = "com.android.tools.build", name = "gradle", version.ref = "androidGradlePlugin" }
+kotlin-gradlePlugin = { group = "org.jetbrains.kotlin", name = "kotlin-gradle-plugin", version.ref = "kotlin" }
+
+[bundles]
+androidx-lifecycle = ["androidx-lifecycle-runtime-ktx", "androidx-lifecycle-viewmodel-ktx"]
+aws-sdk = ["aws-android-sdk-s3", "aws-android-sdk-core", "aws-android-sdk-cognitoidentityprovider"]
+google-api = ["google-api-client-android", "google-api-services-drive", "google-http-client-gson"]
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "androidGradlePlugin" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }

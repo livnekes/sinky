@@ -455,6 +455,8 @@ class MainActivity : AppCompatActivity() {
     override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
         return when (item.itemId) {
             R.id.action_settings -> {
+                // Clear success/error messages when navigating to settings
+                clearStatusMessages()
                 startActivity(Intent(this, SettingsActivity::class.java))
                 true
             }
@@ -466,6 +468,9 @@ class MainActivity : AppCompatActivity() {
         // Mode toggle listener
         binding.modeToggleGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (isChecked) {
+                // Clear success/error messages when switching modes
+                clearStatusMessages()
+
                 when (checkedId) {
                     R.id.manualModeButton -> {
                         isDateRangeMode = false
@@ -532,6 +537,24 @@ class MainActivity : AppCompatActivity() {
 
         binding.cancelButton.setOnClickListener {
             cancelUpload()
+        }
+    }
+
+    private fun clearStatusMessages() {
+        // Clear success/error messages like "Successfully uploaded...", "Uploaded X of Y..."
+        val currentStatus = binding.statusTextView.text.toString()
+        if (currentStatus.contains("Successfully uploaded") ||
+            currentStatus.contains("Uploaded") ||
+            currentStatus.contains("failed") ||
+            currentStatus.contains("skipped") ||
+            currentStatus.contains("Requesting deletion")
+        ) {
+            // Reset to appropriate default message based on mode
+            if (isDateRangeMode) {
+                binding.statusTextView.text = "Select date range to backup photos/videos"
+            } else {
+                binding.statusTextView.text = "Select photos/videos to upload"
+            }
         }
     }
 
