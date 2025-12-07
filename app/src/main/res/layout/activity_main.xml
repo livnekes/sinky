@@ -80,6 +80,14 @@
 
                     </com.google.android.material.button.MaterialButtonToggleGroup>
 
+                    <com.google.android.material.checkbox.MaterialCheckBox
+                        android:id="@+id/largeFilesOnlyCheckbox"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="16dp"
+                        android:text="Large files only (10MB+)"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium" />
+
                     <FrameLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
