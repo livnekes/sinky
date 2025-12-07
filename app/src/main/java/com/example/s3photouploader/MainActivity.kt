@@ -51,6 +51,10 @@ class MainActivity : AppCompatActivity() {
     private var isDateRangeMode = false
     private val dateRangePhotos = mutableListOf<Uri>()
 
+    // Large files filter (10MB+)
+    private var filterLargeFilesOnly = false
+    private val MIN_LARGE_FILE_SIZE = 10 * 1024 * 1024L // 10MB in bytes
+
     // For batch deletion after upload
     private var photosToDelete = mutableListOf<Uri>()
 
@@ -88,7 +92,57 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Image picker launcher for multiple selection
+    // Custom file picker launcher for large files
+    private val customPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            selectedImageUris.clear()
+
+            result.data?.getParcelableArrayListExtra<Uri>(CustomFilePickerActivity.EXTRA_SELECTED_URIS)?.let { uris ->
+                selectedImageUris.addAll(uris)
+            }
+
+            if (selectedImageUris.isNotEmpty()) {
+                // Show first image as preview - load thumbnail properly
+                lifecycleScope.launch {
+                    try {
+                        val firstUri = selectedImageUris[0]
+                        android.util.Log.d("MainActivity", "Loading preview for URI: $firstUri")
+
+                        withContext(Dispatchers.IO) {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                val thumbnail = contentResolver.loadThumbnail(
+                                    firstUri,
+                                    android.util.Size(800, 800),
+                                    null
+                                )
+                                withContext(Dispatchers.Main) {
+                                    binding.imagePreview.setImageBitmap(thumbnail)
+                                    binding.imagePreview.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                                }
+                            } else {
+                                withContext(Dispatchers.Main) {
+                                    binding.imagePreview.setImageURI(firstUri)
+                                    binding.imagePreview.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                                }
+                            }
+                        }
+                        android.util.Log.d("MainActivity", "Preview loaded successfully")
+                    } catch (e: Exception) {
+                        android.util.Log.e("MainActivity", "Error loading preview", e)
+                        binding.imagePreview.setImageResource(R.drawable.ic_image_placeholder)
+                        binding.imagePreview.scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
+                    }
+                }
+
+                binding.uploadButton.isEnabled = true
+                binding.statusTextView.text = "${selectedImageUris.size} large file(s) selected (10MB+). Ready to upload."
+            }
+        }
+    }
+
+    // Image picker launcher for multiple selection (standard system picker)
     private val imagePickerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -401,6 +455,8 @@ class MainActivity : AppCompatActivity() {
     override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
         return when (item.itemId) {
             R.id.action_settings -> {
+                // Clear success/error messages when navigating to settings
+                clearStatusMessages()
                 startActivity(Intent(this, SettingsActivity::class.java))
                 true
             }
@@ -412,6 +468,9 @@ class MainActivity : AppCompatActivity() {
         // Mode toggle listener
         binding.modeToggleGroup.addOnButtonCheckedListener { _, checkedId, isChecked ->
             if (isChecked) {
+                // Clear success/error messages when switching modes
+                clearStatusMessages()
+
                 when (checkedId) {
                     R.id.manualModeButton -> {
                         isDateRangeMode = false
@@ -422,6 +481,15 @@ class MainActivity : AppCompatActivity() {
                         updateUIForMode()
                     }
                 }
+            }
+        }
+
+        // Large files filter checkbox
+        binding.largeFilesOnlyCheckbox.setOnCheckedChangeListener { _, isChecked ->
+            filterLargeFilesOnly = isChecked
+            // Re-query photos if date range is selected
+            if (isDateRangeMode && startDateMillis != null && endDateMillis != null) {
+                queryPhotosForDateRange()
             }
         }
 
@@ -469,6 +537,24 @@ class MainActivity : AppCompatActivity() {
 
         binding.cancelButton.setOnClickListener {
             cancelUpload()
+        }
+    }
+
+    private fun clearStatusMessages() {
+        // Clear success/error messages like "Successfully uploaded...", "Uploaded X of Y..."
+        val currentStatus = binding.statusTextView.text.toString()
+        if (currentStatus.contains("Successfully uploaded") ||
+            currentStatus.contains("Uploaded") ||
+            currentStatus.contains("failed") ||
+            currentStatus.contains("skipped") ||
+            currentStatus.contains("Requesting deletion")
+        ) {
+            // Reset to appropriate default message based on mode
+            if (isDateRangeMode) {
+                binding.statusTextView.text = "Select date range to backup photos/videos"
+            } else {
+                binding.statusTextView.text = "Select photos/videos to upload"
+            }
         }
     }
 
@@ -631,13 +717,54 @@ class MainActivity : AppCompatActivity() {
         uploadImages(selectedImageUris)
     }
 
+    /**
+     * Filter URIs by file size (10MB+)
+     * Returns pair of (filtered URIs, count of filtered out files)
+     */
+    private suspend fun filterUrisBySize(uris: List<Uri>): Pair<List<Uri>, Int> = withContext(Dispatchers.IO) {
+        val largeFileUris = mutableListOf<Uri>()
+        var filteredCount = 0
+
+        for (uri in uris) {
+            try {
+                val size = contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.SIZE), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val sizeIndex = cursor.getColumnIndex(MediaStore.MediaColumns.SIZE)
+                        if (sizeIndex >= 0) {
+                            cursor.getLong(sizeIndex)
+                        } else {
+                            null
+                        }
+                    } else {
+                        null
+                    }
+                }
+
+                if (size != null && size >= MIN_LARGE_FILE_SIZE) {
+                    largeFileUris.add(uri)
+                    android.util.Log.d("MainActivity", "File size: ${size / (1024 * 1024)}MB - INCLUDED")
+                } else {
+                    filteredCount++
+                    android.util.Log.d("MainActivity", "File size: ${size?.div(1024 * 1024) ?: "unknown"}MB - FILTERED OUT")
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "Error checking file size for $uri", e)
+                // If we can't determine size, don't include it when filtering
+                filteredCount++
+            }
+        }
+
+        return@withContext Pair(largeFileUris, filteredCount)
+    }
+
     private suspend fun queryPhotosByDateRange(startMillis: Long, endMillis: Long): List<Uri> = withContext(Dispatchers.IO) {
         val mediaUris = mutableListOf<Uri>()
 
         // Query photos
         val photoProjection = arrayOf(
             MediaStore.Images.Media._ID,
-            MediaStore.Images.Media.DATE_TAKEN
+            MediaStore.Images.Media.DATE_TAKEN,
+            MediaStore.Images.Media.SIZE
         )
 
         val photoSelection = "${MediaStore.Images.Media.DATE_TAKEN} >= ? AND ${MediaStore.Images.Media.DATE_TAKEN} <= ?"
@@ -656,9 +783,17 @@ class MainActivity : AppCompatActivity() {
             sortOrder
         )?.use { cursor ->
             val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+            val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
+                val size = cursor.getLong(sizeColumn)
+
+                // Apply size filter if enabled
+                if (filterLargeFilesOnly && size < MIN_LARGE_FILE_SIZE) {
+                    continue // Skip files smaller than 10MB
+                }
+
                 val contentUri = Uri.withAppendedPath(
                     MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
                     id.toString()
@@ -670,7 +805,8 @@ class MainActivity : AppCompatActivity() {
         // Query videos
         val videoProjection = arrayOf(
             MediaStore.Video.Media._ID,
-            MediaStore.Video.Media.DATE_TAKEN
+            MediaStore.Video.Media.DATE_TAKEN,
+            MediaStore.Video.Media.SIZE
         )
 
         val videoSelection = "${MediaStore.Video.Media.DATE_TAKEN} >= ? AND ${MediaStore.Video.Media.DATE_TAKEN} <= ?"
@@ -689,9 +825,17 @@ class MainActivity : AppCompatActivity() {
             videoSortOrder
         )?.use { cursor ->
             val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+            val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
 
             while (cursor.moveToNext()) {
                 val id = cursor.getLong(idColumn)
+                val size = cursor.getLong(sizeColumn)
+
+                // Apply size filter if enabled
+                if (filterLargeFilesOnly && size < MIN_LARGE_FILE_SIZE) {
+                    continue // Skip files smaller than 10MB
+                }
+
                 val contentUri = Uri.withAppendedPath(
                     MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
                     id.toString()
@@ -700,7 +844,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        android.util.Log.d("MainActivity", "Found ${mediaUris.size} photos and videos")
+        val filterMsg = if (filterLargeFilesOnly) " (filtered for 10MB+)" else ""
+        android.util.Log.d("MainActivity", "Found ${mediaUris.size} photos and videos$filterMsg")
         return@withContext mediaUris
     }
 
@@ -976,12 +1121,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openImagePicker() {
-        val intent = Intent(Intent.ACTION_GET_CONTENT)
-        intent.type = "*/*"
-        val mimeTypes = arrayOf("image/*", "video/*")
-        intent.putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
-        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-        imagePickerLauncher.launch(intent)
+        // If large files filter is enabled, use custom picker
+        if (filterLargeFilesOnly) {
+            val intent = Intent(this, CustomFilePickerActivity::class.java)
+            customPickerLauncher.launch(intent)
+        } else {
+            // Use standard system picker
+            val intent = Intent(Intent.ACTION_GET_CONTENT)
+            intent.type = "*/*"
+            val mimeTypes = arrayOf("image/*", "video/*")
+            intent.putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+            imagePickerLauncher.launch(intent)
+        }
     }
 
     private fun uploadImages(imagesToUpload: MutableList<Uri>) {
